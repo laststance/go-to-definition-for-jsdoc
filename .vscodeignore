@@ -1,0 +1,14 @@
+.git/**
+.serena/**
+.idea/**
+.vscode/**
+images/icon.svg
+images/candidates/**
+src/**/*.test.ts
+src/**
+out/**/*.map
+vitest.config.ts
+tsconfig.json
+pnpm-lock.yaml
+node_modules/**/.cache/**
+*.vsix

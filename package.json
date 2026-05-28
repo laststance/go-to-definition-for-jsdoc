@@ -1,0 +1,82 @@
+{
+  "name": "go-to-definition-for-jsdoc",
+  "displayName": "Go To Definition for JSDoc",
+  "description": "Go to workspace TypeScript symbols from JSDoc {@link 'SymbolName'} tags without importing them first.",
+  "version": "0.0.1",
+  "publisher": "laststance",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/laststance/go-to-definition-for-jsdoc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/laststance/go-to-definition-for-jsdoc/issues"
+  },
+  "homepage": "https://github.com/laststance/go-to-definition-for-jsdoc#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "jsdoc",
+    "typescript",
+    "go to definition",
+    "definition provider",
+    "documentation",
+    "navigation"
+  ],
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Go To Definition for JSDoc",
+      "properties": {
+        "tsLink.enableSourceScanFallback": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use a TypeScript AST workspace scan when VS Code's workspace symbol provider cannot find a JSDoc link target."
+        },
+        "tsLink.maxSourceScanFiles": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1,
+          "description": "Maximum number of source files to scan during the fallback lookup."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf out",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --sourcemap --outfile=out/extension.js",
+    "typecheck": "tsc -p ./ --noEmit",
+    "compile": "pnpm run validate && pnpm run bundle",
+    "test": "vitest run",
+    "validate": "run-p typecheck test clean",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "pnpm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.27.0",
+    "npm-run-all2": "^9.0.1",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}
