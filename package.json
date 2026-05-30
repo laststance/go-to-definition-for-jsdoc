@@ -2,7 +2,7 @@
   "name": "go-to-definition-for-jsdoc",
   "displayName": "Go To Definition for JSDoc",
   "description": "Go to workspace TypeScript symbols from JSDoc {@link 'SymbolName'} tags without importing them first.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "laststance",
   "license": "MIT",
   "icon": "images/icon.png",

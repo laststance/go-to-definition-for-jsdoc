@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.2
+
+- Align extension settings prefix with the package name.
+
 ## 0.0.1
 
 - Initial release.
