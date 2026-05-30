@@ -39,7 +39,7 @@ The fallback skips common generated and dependency directories such as `node_mod
 
 ```sh
 pnpm install
-pnpm run check
+pnpm validate
 pnpm run package
 ```
 
