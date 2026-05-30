@@ -44,12 +44,12 @@
     "configuration": {
       "title": "Go To Definition for JSDoc",
       "properties": {
-        "tsLink.enableSourceScanFallback": {
+        "go-to-definition-for-jsdoc.enableSourceScanFallback": {
           "type": "boolean",
           "default": true,
           "description": "Use a TypeScript AST workspace scan when VS Code's workspace symbol provider cannot find a JSDoc link target."
         },
-        "tsLink.maxSourceScanFiles": {
+        "go-to-definition-for-jsdoc.maxSourceScanFiles": {
           "type": "number",
           "default": 2000,
           "minimum": 1,

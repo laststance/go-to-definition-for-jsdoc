@@ -158,7 +158,7 @@ const readWorkspaceFileAsUtf8 = async (fileUri: vscode.Uri): Promise<string> => 
  * getExtensionConfiguration().enableSourceScanFallback // => true
  */
 const getExtensionConfiguration = (): ExtensionConfiguration => {
-  const configuration = vscode.workspace.getConfiguration('tsLink')
+  const configuration = vscode.workspace.getConfiguration('go-to-definition-for-jsdoc')
   const configuredMaxSourceScanFiles = configuration.get<number>('maxSourceScanFiles', MAX_SOURCE_SCAN_FILES)
 
   return {
