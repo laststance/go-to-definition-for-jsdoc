@@ -48,7 +48,8 @@ To try the extension locally, open this folder in VS Code and run the `Run Go To
 ## Publishing
 
 ```sh
-export VSCE_PAT="your-marketplace-token"
 pnpm run package
-pnpm run publish
+pnpm run publish:stores
 ```
+
+Publishing reads `VSCE_PAT` and `OVSX_PAT` from 1Password through `.env.1password`.

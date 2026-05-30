@@ -2,8 +2,10 @@
 .serena/**
 .idea/**
 .vscode/**
+.env.1password
 images/icon.svg
 images/candidates/**
+scripts/**
 src/**/*.test.ts
 src/**
 out/**/*.map

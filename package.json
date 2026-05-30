@@ -66,7 +66,11 @@
     "test": "vitest run",
     "validate": "run-p typecheck test clean",
     "package": "vsce package",
-    "publish": "vsce publish",
+    "publish": "pnpm run publish:vsce",
+    "publish:vsce": "op run --env-file=.env.1password -- vsce publish",
+    "publish:ovsx": "op run --env-file=.env.1password -- pnpm dlx ovsx publish",
+    "publish:stores": "pnpm run package && op run --env-file=.env.1password -- node scripts/publish-stores.mjs",
+    "publish:stores:dry-run": "node scripts/publish-stores.mjs --dry-run",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "pnpm run compile"
   },
