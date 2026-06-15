@@ -2,6 +2,11 @@
 
 Go To Definition for JSDoc makes inline documentation links jump to TypeScript workspace symbols even when the current file does not import the symbol.
 
+## Install
+
+- [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc)
+- [Open VSX Registry](https://open-vsx.org/extension/laststance/go-to-definition-for-jsdoc)
+
 ## Features
 
 - Jump from JSDoc inline links to workspace TypeScript symbols.
