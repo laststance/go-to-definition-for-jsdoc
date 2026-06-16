@@ -15,9 +15,9 @@ Go To Definition for JSDoc makes inline documentation links jump to TypeScript w
 
 ## Demo
 
-<video src="./media/demo.mp4" controls width="720" aria-label="Go To Definition for JSDoc demo"></video>
+[![Go To Definition for JSDoc demo](./media/demo.gif)](./media/demo.mp4)
 
-[Watch the demo video](./media/demo.mp4)
+[Watch the MP4 demo](./media/demo.mp4)
 
 ## Usage
 
