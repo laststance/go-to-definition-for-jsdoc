@@ -13,6 +13,12 @@ Go To Definition for JSDoc makes inline documentation links jump to TypeScript w
 - Supports unimported symbols such as `{@link 'useReadableDrawingItemSettingsQuery'}`.
 - Falls back to a TypeScript AST scan when VS Code's workspace symbol provider has no result.
 
+## Demo
+
+<video src="./media/demo.mp4" controls width="720" aria-label="Go To Definition for JSDoc demo"></video>
+
+[Watch the demo video](./media/demo.mp4)
+
 ## Usage
 
 ```ts
