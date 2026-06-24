@@ -1,0 +1,16 @@
+# Keep the deployment focused on the static landing page and its media.
+node_modules
+out
+src
+scripts
+.vscode
+coverage
+README.md
+CHANGELOG.md
+LICENSE
+package.json
+pnpm-lock.yaml
+tsconfig.json
+vitest.config.ts
+*.test.ts
+*.vsix
