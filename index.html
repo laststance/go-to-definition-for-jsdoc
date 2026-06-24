@@ -1,953 +1,313 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Go To Definition for JSDoc</title>
-    <meta
-      name="description"
-      content="Jump from JSDoc {@link} references to TypeScript and JavaScript workspace symbols in VS Code without adding throwaway imports."
-    />
-    <meta property="og:title" content="Go To Definition for JSDoc" />
-    <meta
-      property="og:description"
-      content="A tiny VS Code extension that keeps JSDoc links navigable without turning comments into dependency wiring."
-    />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://go-to-definition-for-jsdoc.vercel.app/media/demo.gif" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://go-to-definition-for-jsdoc.vercel.app/media/demo.gif" />
-    <link rel="icon" href="/images/icon.png" />
-    <style>
-      :root {
-        color-scheme: dark;
-        --page: #090d11;
-        --surface: #10161c;
-        --surface-strong: #141d24;
-        --line: rgba(232, 238, 244, 0.12);
-        --line-strong: rgba(232, 238, 244, 0.24);
-        --text: #eef4f7;
-        --muted: #a7b3bd;
-        --soft: #74818d;
-        --mint: #66e6ad;
-        --sky: #5bc6ff;
-        --coral: #ff7d70;
-        --amber: #f5c35f;
-        --radius: 8px;
-        --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-        --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      html {
-        scroll-behavior: smooth;
-      }
-
-      body {
-        margin: 0;
-        background:
-          linear-gradient(180deg, rgba(91, 198, 255, 0.08), transparent 32rem),
-          var(--page);
-        color: var(--text);
-        font-family: var(--sans);
-      }
-
-      a {
-        color: inherit;
-      }
-
-      code,
-      kbd,
-      pre {
-        font-family: var(--mono);
-      }
-
-      .site-shell {
-        min-height: 100vh;
-        overflow: hidden;
-      }
-
-      .topbar {
-        position: fixed;
-        z-index: 20;
-        top: 0;
-        right: 0;
-        left: 0;
-        border-bottom: 1px solid rgba(232, 238, 244, 0.08);
-        background: rgba(9, 13, 17, 0.78);
-        backdrop-filter: blur(18px);
-      }
-
-      .topbar-inner {
-        display: flex;
-        max-width: 1180px;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin: 0 auto;
-        padding: 0.85rem 1.25rem;
-      }
-
-      .brand {
-        display: inline-flex;
-        min-width: 0;
-        align-items: center;
-        gap: 0.7rem;
-        text-decoration: none;
-      }
-
-      .brand-mark {
-        display: grid;
-        width: 2.2rem;
-        height: 2.2rem;
-        flex: 0 0 auto;
-        place-items: center;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        background: #10171d;
-        color: var(--mint);
-        font-family: var(--mono);
-        font-size: 0.82rem;
-        font-weight: 800;
-      }
-
-      .brand-text {
-        overflow: hidden;
-        font-size: 0.94rem;
-        font-weight: 700;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .brand-text span {
-        color: var(--muted);
-        font-weight: 500;
-      }
-
-      .nav-links {
-        display: flex;
-        align-items: center;
-        gap: 0.35rem;
-      }
-
-      .nav-link,
-      .button {
-        display: inline-flex;
-        min-height: 2.45rem;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        border-radius: var(--radius);
-        font-size: 0.9rem;
-        font-weight: 650;
-        text-decoration: none;
-        white-space: nowrap;
-      }
-
-      .nav-link {
-        padding: 0 0.85rem;
-        color: var(--muted);
-      }
-
-      .nav-link:hover {
-        color: var(--text);
-        background: rgba(255, 255, 255, 0.05);
-      }
-
-      .button {
-        border: 1px solid transparent;
-        padding: 0 1rem;
-        cursor: pointer;
-      }
-
-      .button-primary {
-        background: var(--mint);
-        color: #06140f;
-        box-shadow: 0 14px 34px -20px var(--mint);
-      }
-
-      .button-secondary {
-        border-color: var(--line);
-        background: rgba(255, 255, 255, 0.055);
-        color: var(--text);
-      }
-
-      .hero {
-        position: relative;
-        display: grid;
-        min-height: 86vh;
-        align-items: center;
-        padding: 6.25rem 1.25rem 4rem;
-        isolation: isolate;
-      }
-
-      .hero::after {
-        position: absolute;
-        z-index: -1;
-        inset: auto 0 0;
-        height: 36%;
-        background: linear-gradient(180deg, transparent, var(--page));
-        content: "";
-      }
-
-      .hero-media {
-        position: absolute;
-        z-index: -3;
-        inset: 0;
-        overflow: hidden;
-        background: #090d11;
-      }
-
-      .hero-media video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        opacity: 0.68;
-      }
-
-      .hero-scrim {
-        position: absolute;
-        z-index: -2;
-        inset: 0;
-        background:
-          linear-gradient(90deg, rgba(9, 13, 17, 0.96) 0%, rgba(9, 13, 17, 0.7) 43%, rgba(9, 13, 17, 0.22) 100%),
-          linear-gradient(180deg, rgba(9, 13, 17, 0.78), rgba(9, 13, 17, 0.34) 45%, rgba(9, 13, 17, 0.82));
-      }
-
-      .hero-inner {
-        width: min(1180px, 100%);
-        margin: 0 auto;
-      }
-
-      .eyebrow {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.55rem;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 0.45rem 0.75rem;
-        background: rgba(16, 22, 28, 0.72);
-        color: var(--muted);
-        font-family: var(--mono);
-        font-size: 0.78rem;
-      }
-
-      .status-dot {
-        width: 0.48rem;
-        height: 0.48rem;
-        border-radius: 50%;
-        background: var(--mint);
-        box-shadow: 0 0 0 0.25rem rgba(102, 230, 173, 0.12);
-      }
-
-      h1,
-      h2,
-      h3,
-      p {
-        margin-top: 0;
-      }
-
-      h1 {
-        max-width: 13ch;
-        margin-bottom: 1rem;
-        font-size: clamp(3.2rem, 7.1vw, 6.6rem);
-        line-height: 0.94;
-        letter-spacing: 0;
-      }
-
-      .lead {
-        max-width: 42rem;
-        margin-bottom: 1.65rem;
-        color: #c5d0d8;
-        font-size: 1.16rem;
-        line-height: 1.65;
-      }
-
-      .lead code {
-        color: var(--sky);
-        font-size: 0.94em;
-      }
-
-      .hero-actions,
-      .share-actions,
-      .install-row {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.75rem;
-      }
-
-      .install-row {
-        width: fit-content;
-        max-width: 100%;
-        margin-top: 1.25rem;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 0.45rem;
-        background: rgba(11, 16, 20, 0.86);
-        color: #cad4dc;
-        font-family: var(--mono);
-        font-size: 0.85rem;
-      }
-
-      .install-row span {
-        overflow-wrap: anywhere;
-        padding: 0.3rem 0.45rem 0.3rem 0.65rem;
-      }
-
-      .copy-button {
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.06);
-        color: #dbe4ea;
-        font-family: var(--mono);
-        font-size: 0.78rem;
-      }
-
-      main {
-        background: var(--page);
-      }
-
-      .section {
-        width: min(1180px, calc(100% - 2.5rem));
-        margin: 0 auto;
-        padding: 4rem 0;
-      }
-
-      .section-heading {
-        max-width: 46rem;
-      }
-
-      h2 {
-        margin-bottom: 0.85rem;
-        font-size: clamp(2rem, 4vw, 2.7rem);
-        line-height: 1.08;
-        letter-spacing: 0;
-      }
-
-      .section-heading p {
-        color: var(--muted);
-        font-size: 1rem;
-        line-height: 1.7;
-      }
-
-      .split-grid,
-      .feature-grid,
-      .steps-grid {
-        display: grid;
-        gap: 1rem;
-      }
-
-      .split-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        margin-top: 2rem;
-      }
-
-      .feature-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        margin-top: 1.5rem;
-      }
-
-      .steps-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        margin-top: 1.7rem;
-      }
-
-      .panel,
-      .feature,
-      .step,
-      .scope-panel {
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        background: var(--surface);
-      }
-
-      .panel {
-        overflow: hidden;
-      }
-
-      .panel[data-tone="problem"] {
-        border-color: rgba(255, 125, 112, 0.34);
-      }
-
-      .panel[data-tone="solution"] {
-        border-color: rgba(102, 230, 173, 0.36);
-        background: #0f1819;
-      }
-
-      .panel-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        border-bottom: 1px solid rgba(232, 238, 244, 0.08);
-        padding: 0.85rem 1rem;
-      }
-
-      .panel-title {
-        color: var(--mint);
-        font-size: 0.86rem;
-        font-weight: 800;
-      }
-
-      .panel[data-tone="problem"] .panel-title {
-        color: var(--coral);
-      }
-
-      .panel-kicker {
-        color: var(--soft);
-        font-family: var(--mono);
-        font-size: 0.76rem;
-      }
-
-      pre {
-        margin: 0;
-        overflow-x: auto;
-        padding: 1rem;
-        color: #cfd9e0;
-        font-size: 0.85rem;
-        line-height: 1.8;
-        white-space: pre-wrap;
-      }
-
-      .token-comment {
-        color: #697784;
-      }
-
-      .token-keyword {
-        color: #c69df6;
-      }
-
-      .token-string {
-        color: #94d99b;
-      }
-
-      .token-symbol {
-        color: var(--sky);
-      }
-
-      .token-function {
-        color: var(--amber);
-      }
-
-      .panel-note {
-        margin: 0;
-        padding: 0 1rem 1rem;
-        color: var(--soft);
-        font-size: 0.86rem;
-        line-height: 1.6;
-      }
-
-      .feature {
-        min-height: 4.35rem;
-        padding: 1rem;
-        color: #cfd9e0;
-        font-family: var(--mono);
-        font-size: 0.9rem;
-        line-height: 1.45;
-      }
-
-      .chip-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.55rem;
-        margin-top: 1rem;
-      }
-
-      .chip {
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 0.45rem 0.75rem;
-        color: var(--muted);
-        font-family: var(--mono);
-        font-size: 0.78rem;
-      }
-
-      .step {
-        padding: 1.25rem;
-      }
-
-      .step-number {
-        margin-bottom: 1rem;
-        color: var(--mint);
-        font-family: var(--mono);
-        font-size: 0.82rem;
-      }
-
-      h3 {
-        margin-bottom: 0.45rem;
-        font-size: 1.1rem;
-      }
-
-      .step p,
-      .scope-panel p {
-        margin-bottom: 0;
-        color: var(--muted);
-        font-size: 0.94rem;
-        line-height: 1.65;
-      }
-
-      .demo-frame {
-        overflow: hidden;
-        margin-top: 1.4rem;
-        border: 1px solid var(--line-strong);
-        border-radius: var(--radius);
-        background: #070b0f;
-        box-shadow: 0 34px 80px -44px rgba(0, 0, 0, 0.9);
-      }
-
-      .demo-frame video {
-        display: block;
-        width: 100%;
-        height: auto;
-        background: #070b0f;
-      }
-
-      .scope-panel {
-        display: grid;
-        grid-template-columns: minmax(0, 1.08fr) minmax(16rem, 0.92fr);
-        gap: 1.5rem;
-        align-items: center;
-        padding: 1.5rem;
-        background: linear-gradient(135deg, #11181e, #0c1014);
-      }
-
-      .scope-label {
-        margin-bottom: 0.7rem;
-        color: var(--soft);
-        font-family: var(--mono);
-        font-size: 0.76rem;
-      }
-
-      .scope-panel a {
-        display: inline-flex;
-        margin-top: 1rem;
-        color: var(--sky);
-        font-family: var(--mono);
-        font-size: 0.85rem;
-        text-decoration: none;
-      }
-
-      .scope-code {
-        border: 1px solid rgba(232, 238, 244, 0.08);
-        border-radius: var(--radius);
-        background: #090d11;
-      }
-
-      .final-cta {
-        text-align: center;
-      }
-
-      .final-cta p {
-        max-width: 36rem;
-        margin: 0 auto 1.5rem;
-        color: var(--muted);
-        line-height: 1.7;
-      }
-
-      .final-cta .hero-actions,
-      .share-actions {
-        justify-content: center;
-      }
-
-      .share-label {
-        margin: 2rem 0 0.9rem;
-        color: var(--soft);
-        font-family: var(--mono);
-        font-size: 0.76rem;
-        text-transform: uppercase;
-      }
-
-      footer {
-        border-top: 1px solid rgba(232, 238, 244, 0.08);
-      }
-
-      .footer-inner {
-        display: flex;
-        width: min(1180px, calc(100% - 2.5rem));
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin: 0 auto;
-        padding: 1.5rem 0 2rem;
-        color: var(--soft);
-        font-size: 0.84rem;
-      }
-
-      .footer-inner a {
-        color: var(--muted);
-        text-decoration: none;
-      }
-
-      @media (max-width: 860px) {
-        .nav-links .nav-link {
-          display: none;
-        }
-
-        .hero {
-          min-height: 88svh;
-          padding-top: 5.4rem;
-        }
-
-        .hero-media video {
-          object-position: 58% center;
-          opacity: 0.5;
-        }
-
-        .hero-scrim {
-          background:
-            linear-gradient(90deg, rgba(9, 13, 17, 0.96), rgba(9, 13, 17, 0.7)),
-            linear-gradient(180deg, rgba(9, 13, 17, 0.76), rgba(9, 13, 17, 0.82));
-        }
-
-        h1 {
-          max-width: 11ch;
-          font-size: 3.45rem;
-        }
-
-        .split-grid,
-        .feature-grid,
-        .steps-grid,
-        .scope-panel {
-          grid-template-columns: 1fr;
-        }
-
-        .section {
-          padding: 3rem 0;
-        }
-
-        .footer-inner {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-      }
-
-      @media (max-width: 560px) {
-        .topbar-inner,
-        .section,
-        .footer-inner {
-          width: calc(100% - 1.5rem);
-        }
-
-        .topbar-inner {
-          padding-right: 0;
-          padding-left: 0;
-        }
-
-        .brand-text {
-          max-width: 12.8rem;
-        }
-
-        .hero {
-          padding-right: 0.75rem;
-          padding-left: 0.75rem;
-        }
-
-        h1 {
-          font-size: 2.7rem;
-        }
-
-        .lead {
-          font-size: 1rem;
-        }
-
-        .button {
-          width: 100%;
-        }
-
-        .install-row {
-          width: 100%;
-        }
-
-        .copy-button {
-          width: auto;
-          margin-left: auto;
-        }
-
-        .panel-header {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="site-shell">
-      <header class="topbar">
-        <div class="topbar-inner">
-          <a class="brand" href="#top" aria-label="Go To Definition for JSDoc home">
-            <span class="brand-mark">{ }</span>
-            <span class="brand-text">Go To Definition <span>for JSDoc</span></span>
-          </a>
-          <nav class="nav-links" aria-label="Primary navigation">
-            <a class="nav-link" href="https://github.com/laststance/go-to-definition-for-jsdoc">GitHub</a>
-            <a class="nav-link" href="https://open-vsx.org/extension/laststance/go-to-definition-for-jsdoc">Open VSX</a>
-            <a
-              class="button button-primary"
-              href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc"
-            >
-              Install
-            </a>
-          </nav>
-        </div>
-      </header>
-
-      <section id="top" class="hero" aria-labelledby="hero-title">
-        <div class="hero-media" aria-hidden="true">
-          <video autoplay muted loop playsinline poster="/media/demo.gif">
-            <source src="/media/demo.mp4" type="video/mp4" />
-          </video>
-        </div>
-        <div class="hero-scrim" aria-hidden="true"></div>
-        <div class="hero-inner">
-          <p class="eyebrow"><span class="status-dot"></span>VS Code Extension · v0.0.3</p>
-          <h1 id="hero-title">Go To Definition for JSDoc</h1>
-          <p class="lead">
-            Jump from JSDoc <code>{@link}</code> references to workspace symbols in VS Code,
-            without adding throwaway imports just to navigate.
-          </p>
-          <div class="hero-actions">
-            <a
-              class="button button-primary"
-              href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc"
-            >
-              Get it on the Marketplace
-            </a>
-            <a class="button button-secondary" href="https://github.com/laststance/go-to-definition-for-jsdoc">
-              View source
-            </a>
-          </div>
-          <div class="install-row" aria-label="Install command">
-            <span data-install-command>$ code --install-extension laststance.go-to-definition-for-jsdoc</span>
-            <button class="button copy-button" type="button" data-copy-button>Copy</button>
-          </div>
-        </div>
-      </section>
-
-      <main>
-        <section class="section" aria-labelledby="problem-title">
-          <div class="section-heading">
-            <h2 id="problem-title">Documentation should not become dependency wiring</h2>
-            <p>
-              A JSDoc link can force you to import a type or value purely so TypeScript can
-              see it. That works, but it turns a comment into plumbing and fights organize imports.
-            </p>
-          </div>
-          <div class="split-grid">
-            <article class="panel" data-tone="problem">
-              <div class="panel-header">
-                <div class="panel-title">The workaround</div>
-                <div class="panel-kicker">import just to navigate</div>
-              </div>
-              <pre><code><span class="token-keyword">import type</span> { useCanvasViewportQuery } <span class="token-keyword">from</span> <span class="token-string">'./queries'</span>
-
-<span class="token-comment">/**
- * See {@link <span class="token-symbol">useCanvasViewportQuery</span>}.
- */</span></code></pre>
-              <p class="panel-note">
-                An import added only so navigation works. Auto organize can strip it; lint can flag it.
-              </p>
-            </article>
-
-            <article class="panel" data-tone="solution">
-              <div class="panel-header">
-                <div class="panel-title">With the extension</div>
-                <div class="panel-kicker">just a comment</div>
-              </div>
-              <pre><code><span class="token-comment">/**
- * See {@link <span class="token-symbol">useCanvasViewportQuery</span>}.
- */</span>
-<span class="token-keyword">export function</span> <span class="token-function">readDrawingSettings</span>() {
-  <span class="token-comment">// ...</span>
-}</code></pre>
-              <p class="panel-note">
-                Put the cursor in the link target, run Go to Definition, and land on the symbol.
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <section class="section" aria-labelledby="links-title">
-          <div class="section-heading">
-            <h2 id="links-title">Recognizes the link forms you already write</h2>
-            <p>Inline JSDoc links across TypeScript, TSX, JavaScript, and JSX.</p>
-          </div>
-          <div class="feature-grid">
-            <div class="feature">{@link <span class="token-symbol">SymbolName</span>}</div>
-            <div class="feature">{@link <span class="token-string">'SymbolName'</span>}</div>
-            <div class="feature">{@link <span class="token-string">"SymbolName"</span>}</div>
-            <div class="feature">{@link <span class="token-function">Namespace</span>.<span class="token-symbol">SymbolName</span>}</div>
-            <div class="feature">{@linkplain <span class="token-symbol">SymbolName</span>}</div>
-            <div class="feature">{@linkcode <span class="token-symbol">SymbolName</span>}</div>
-          </div>
-          <div class="chip-row" aria-label="Supported languages">
-            <span class="chip">TypeScript</span>
-            <span class="chip">TSX</span>
-            <span class="chip">JavaScript</span>
-            <span class="chip">JSX</span>
-          </div>
-        </section>
-
-        <section class="section" aria-labelledby="lookup-title">
-          <div class="section-heading">
-            <h2 id="lookup-title">A lookup that stays intentionally simple</h2>
-          </div>
-          <div class="steps-grid">
-            <article class="step">
-              <div class="step-number">01</div>
-              <h3>Exact match first</h3>
-              <p>Ask VS Code's workspace symbol provider for an exact match on the link target.</p>
-            </article>
-            <article class="step">
-              <div class="step-number">02</div>
-              <h3>Fall back to the AST</h3>
-              <p>Scan TypeScript and JavaScript files when the symbol provider has no result yet.</p>
-            </article>
-            <article class="step">
-              <div class="step-number">03</div>
-              <h3>Skip generated noise</h3>
-              <p>Ignore dependency and output folders like node_modules, dist, out, .next, and .git.</p>
-            </article>
-          </div>
-        </section>
-
-        <section class="section" aria-labelledby="demo-title">
-          <div class="section-heading">
-            <h2 id="demo-title">See the jump in a real editor</h2>
-            <p>The page uses the same shipped demo asset as the README, so the landing page matches the extension's public proof.</p>
-          </div>
-          <div class="demo-frame">
-            <video controls playsinline muted loop poster="/media/demo.gif">
-              <source src="/media/demo.mp4" type="video/mp4" />
-            </video>
-          </div>
-        </section>
-
-        <section class="section" aria-labelledby="scope-title">
-          <div class="scope-panel">
-            <div>
-              <div class="scope-label">SCOPE</div>
-              <h2 id="scope-title">What it does not try to solve</h2>
-              <p>
-                It does not make relative file links native in TypeScript or VS Code. This extension stays
-                on symbol navigation, which keeps it small and predictable.
-              </p>
-              <a href="https://github.com/microsoft/TypeScript/issues/47718">microsoft/TypeScript#47718</a>
-            </div>
-            <div class="scope-code">
-              <pre><code><span class="token-comment">/**
- * See {@link ./some-file.ts}.
- */</span>
-<span class="token-comment"># relative file path: out of scope</span></code></pre>
-            </div>
-          </div>
-        </section>
-
-        <section class="section final-cta" aria-labelledby="cta-title">
-          <h2 id="cta-title">Keep the good habit low-friction.</h2>
-          <p>
-            Documentation links should be cheap to write. Install it and run Go to Definition
-            inside any supported JSDoc link.
-          </p>
-          <div class="hero-actions">
-            <a
-              class="button button-primary"
-              href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc"
-            >
-              VS Code Marketplace
-            </a>
-            <a class="button button-secondary" href="https://open-vsx.org/extension/laststance/go-to-definition-for-jsdoc">
-              Open VSX
-            </a>
-            <a class="button button-secondary" href="https://github.com/laststance/go-to-definition-for-jsdoc">
-              GitHub
-            </a>
-          </div>
-          <div class="share-label">Share it with a fellow dev</div>
-          <div class="share-actions">
-            <a class="button button-secondary" data-share-x target="_blank" rel="noopener">Share on X</a>
-            <a class="button button-secondary" data-share-bsky target="_blank" rel="noopener">Share on Bluesky</a>
-          </div>
-        </section>
-      </main>
-
-      <footer>
-        <div class="footer-inner">
-          <div>
-            Go To Definition for JSDoc · v0.0.3 · by
-            <a href="https://laststance.io">Ryota Murakami · Laststance.io</a>
-          </div>
-          <div><code>{ }</code> let the comment stay a comment</div>
-        </div>
-      </footer>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Go To Definition for JSDoc</title>
+<meta name="description" content="Jump from JSDoc {@link} references to workspace symbols in VS Code without adding throwaway imports.">
+<meta property="og:title" content="Go To Definition for JSDoc">
+<meta property="og:description" content="A tiny VS Code extension that keeps JSDoc links navigable without turning comments into dependency wiring.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://go-to-definition-for-jsdoc.vercel.app/screenshots/jump2.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://go-to-definition-for-jsdoc.vercel.app/screenshots/jump2.png">
+<link rel="icon" href="/images/icon.png">
+<script src="./support.js"></script>
+<template id="__bundler_thumbnail" data-bg-color="#0b0e11">
+<svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+<rect width="1200" height="800" fill="#0b0e11"></rect>
+<text x="600" y="330" text-anchor="middle" font-family="monospace" font-size="180" font-weight="700" fill="#5fe3b0">{ }</text>
+<rect x="430" y="430" width="340" height="14" rx="7" fill="#5bc6ff" opacity="0.7"></rect>
+<rect x="500" y="470" width="200" height="14" rx="7" fill="#2a3138"></rect>
+<text x="600" y="600" text-anchor="middle" font-family="monospace" font-size="40" font-weight="600" fill="#aab4be">Go To Definition for JSDoc</text>
+</svg>
+</template>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#0b0e11;color:#e7ecf1;font-family:'Space Grotesk',system-ui,sans-serif}
+::selection{background:rgba(95,227,176,.28)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes srcGlow{0%,4%{opacity:0}9%,90%{opacity:1}100%{opacity:0}}
+@keyframes dstGlow{0%,40%{opacity:0}47%,90%{opacity:1}100%{opacity:0}}
+@keyframes railDraw{0%,17%{transform:scaleY(0)}40%,90%{transform:scaleY(1)}100%{transform:scaleY(0)}}
+@keyframes dotMove{0%,17%{opacity:0;top:86px}20%{opacity:1;top:86px}40%{opacity:1;top:310px}47%{opacity:0;top:310px}100%{opacity:0;top:310px}}
+@keyframes jumpDot{0%,17%{opacity:0;top:116px;left:17px}21%{opacity:1;top:116px;left:17px}30%{left:30px}42%{opacity:1;top:386px;left:17px}49%{opacity:0;top:386px}100%{opacity:0;top:386px;left:17px}}
+@keyframes gapDraw{0%,18%{transform:scaleY(0)}40%,90%{transform:scaleY(1)}100%{transform:scaleY(0)}}
+@keyframes winActivate{0%,40%{opacity:0}48%,90%{opacity:1}100%{opacity:0}}
+@keyframes labelIn{0%,2%{opacity:0;transform:translateY(6px)}9%,84%{opacity:1;transform:none}94%,100%{opacity:0;transform:translateY(6px)}}
+@keyframes tagIn{0%,47%{opacity:0;transform:translateX(-8px)}54%,88%{opacity:1;transform:none}96%,100%{opacity:0;transform:translateX(-8px)}}
+@keyframes scrollHint{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(5px)}}
+</style>
+</helmet>
+<div style="--accent: {{ accent }}; min-height:100%; background:
+   radial-gradient(900px 520px at 78% -8%, color-mix(in srgb, var(--accent,#5fe3b0) 13%, transparent), transparent 60%),
+   radial-gradient(700px 500px at 0% 12%, rgba(91,198,255,.08), transparent 60%),
+   #0b0e11; overflow:hidden">
+
+  <!-- NAV -->
+  <nav style="max-width:1180px;margin:0 auto;padding:22px 32px;display:flex;align-items:center;justify-content:space-between;gap:24px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:34px;height:34px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:#11161b;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:15px;color:var(--accent,#5fe3b0)">{ }</div>
+      <div style="font-weight:600;font-size:15px;letter-spacing:-.01em">Go To Definition <span style="color:#7d8893;font-weight:500">for JSDoc</span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;font-size:13.5px">
+      <a href="https://github.com/laststance/go-to-definition-for-jsdoc" style="color:#aab4be;text-decoration:none;padding:9px 14px;border-radius:9px">GitHub</a>
+      <a href="https://open-vsx.org/extension/laststance/go-to-definition-for-jsdoc" style="color:#aab4be;text-decoration:none;padding:9px 14px;border-radius:9px">Open VSX</a>
+      <a href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc" style="color:#06140f;background:var(--accent,#5fe3b0);text-decoration:none;padding:9px 16px;border-radius:9px;font-weight:600">Install</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section style="max-width:1180px;margin:0 auto;padding:42px 32px 30px;display:grid;grid-template-columns:1fr 1.05fr;gap:54px;align-items:center">
+    <div>
+      <div style="display:inline-flex;align-items:center;gap:9px;padding:6px 13px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#aab4be;background:rgba(255,255,255,.02)">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--accent,#5fe3b0);box-shadow:0 0 10px var(--accent,#5fe3b0)"></span>
+        VS Code Extension · v0.0.3
+      </div>
+      <h1 style="font-size:58px;line-height:1.02;letter-spacing:-.03em;font-weight:700;margin:22px 0 0">Jump to the symbol.<br><span style="color:#5d6b78">Skip the import.</span></h1>
+      <p style="font-size:18.5px;line-height:1.55;color:#aeb8c2;margin:22px 0 0;max-width:480px">A tiny VS Code extension that makes JSDoc <code style="font-family:'JetBrains Mono',monospace;font-size:15px;color:#5bc6ff">{@link}</code> references work with <b style="color:#e7ecf1;font-weight:600">Go to Definition</b> — without adding throwaway imports just to navigate.</p>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-top:30px;flex-wrap:wrap">
+        <a href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc" style="display:inline-flex;align-items:center;gap:9px;color:#06140f;background:var(--accent,#5fe3b0);text-decoration:none;padding:13px 22px;border-radius:11px;font-weight:600;font-size:15px;box-shadow:0 8px 30px -8px color-mix(in srgb, var(--accent,#5fe3b0) 60%, transparent)">Get it on the Marketplace →</a>
+        <a href="https://github.com/laststance/go-to-definition-for-jsdoc" style="display:inline-flex;align-items:center;gap:9px;color:#dbe2e9;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);text-decoration:none;padding:13px 20px;border-radius:11px;font-weight:500;font-size:15px">View source</a>
+      </div>
+
+      <div style="margin-top:20px;display:inline-flex;align-items:center;gap:14px;background:#10151a;border:1px solid rgba(255,255,255,.09);border-radius:11px;padding:11px 12px 11px 16px;font-family:'JetBrains Mono',monospace;font-size:13.5px;color:#cdd5dd">
+        <span style="color:#4a5560">$</span>
+        <span>code --install-extension laststance.go-to-definition-for-jsdoc</span>
+        <button onClick="{{ copy }}" style="cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#cdd5dd;font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 11px;border-radius:7px">{{ copyLabel }}</button>
+      </div>
     </div>
 
-    <script>
-      const installCommand = "code --install-extension laststance.go-to-definition-for-jsdoc";
-      const shareUrl = "https://laststance.io/articles/Go-To-Definition-for-JSDoc-Released";
-      const shareText =
-        "Go To Definition for JSDoc - jump to {@link} symbols in VS Code without adding throwaway imports.";
+    <!-- ANIMATED EDITOR : two files -->
+    <div style="position:relative;animation:floaty 7s ease-in-out infinite">
+      <div style="position:absolute;inset:-26px;background:radial-gradient(closest-side, color-mix(in srgb, var(--accent,#5fe3b0) 16%, transparent), transparent);filter:blur(22px);opacity:.6"></div>
 
-      /**
-       * Copies the install command after the install row button is pressed.
-       * @param {HTMLButtonElement} button Button that receives temporary copied feedback.
-       * @returns {Promise<void>} Resolves after clipboard handling and UI feedback finish.
-       * @example copyInstallCommand(document.querySelector("[data-copy-button]"))
-       */
-      async function copyInstallCommand(button) {
-        try {
-          await navigator.clipboard.writeText(installCommand);
-          button.textContent = "Copied";
-        } catch (_error) {
-          // Clipboard can be blocked in local previews, so highlight the command for manual copy.
-          const command = document.querySelector("[data-install-command]");
-          if (command) {
-            const range = document.createRange();
-            range.selectNodeContents(command);
-            const selection = window.getSelection();
-            if (selection) {
-              selection.removeAllRanges();
-              selection.addRange(range);
-            }
-          }
-          button.textContent = "Select text";
-        }
+      <!-- ===== FILE A : drawing.ts ===== -->
+      <div style="position:relative;border-radius:13px;border:1px solid rgba(255,255,255,.1);background:#0e1216;box-shadow:0 30px 70px -34px rgba(0,0,0,.8);overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);background:#11161b">
+          <span style="width:11px;height:11px;border-radius:50%;background:#ff5f57"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:#febc2e"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:#28c840"></span>
+          <div style="margin-left:12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#7d8893"><span style="opacity:.6">src/</span><span style="color:#cdd5dd">drawing.ts</span></div>
+        </div>
+        <div style="padding:12px 0;font-family:'JetBrains Mono',monospace;font-size:14px;line-height:28px">
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">1</span><span style="white-space:pre;color:#5d6b78">/**</span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">2</span><span style="white-space:pre;color:#5d6b78"> * Reads drawing settings from the shared query.</span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">3</span><span style="white-space:pre;color:#5d6b78"> * See {@link <span style="color:#5bc6ff;text-decoration:underline;text-decoration-style:dotted">useCanvasViewportQuery</span>}.</span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">4</span><span style="white-space:pre;color:#5d6b78"> */</span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">5</span><span style="white-space:pre"><span style="color:#c79bf0">export</span> <span style="color:#c79bf0">function</span> <span style="color:#e8c785">readDrawingSettings</span><span style="color:#c4ccd4">() {</span></span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">6</span><span style="white-space:pre;color:#5d6b78">  // ...</span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">7</span><span style="white-space:pre;color:#c4ccd4">}</span></div>
+        </div>
+      </div>
 
-        window.setTimeout(() => {
-          button.textContent = "Copy";
-        }, 1600);
-      }
+      <!-- gap with travelling connector -->
+      <div style="height:38px"></div>
 
-      /**
-       * Builds social intent URLs once the static page knows its deploy context.
-       * @returns {void} Updates share anchors in place.
-       * @example setShareLinks()
-       */
-      function setShareLinks() {
-        const xLink = document.querySelector("[data-share-x]");
-        const bskyLink = document.querySelector("[data-share-bsky]");
-        const currentUrl = window.location.origin === "null" ? shareUrl : window.location.href;
-        const encodedUrl = encodeURIComponent(currentUrl);
-        const encodedText = encodeURIComponent(shareText);
+      <!-- ===== FILE B : queries.ts ===== -->
+      <div style="position:relative;border-radius:13px;border:1px solid rgba(255,255,255,.1);background:#0e1216;box-shadow:0 30px 70px -34px rgba(0,0,0,.8);overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);background:#11161b">
+          <span style="width:11px;height:11px;border-radius:50%;background:#ff5f57"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:#febc2e"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:#28c840"></span>
+          <div style="margin-left:12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#7d8893"><span style="opacity:.6">src/hooks/</span><span style="color:#cdd5dd">queries.ts</span></div>
+          <span style="margin-left:auto;font-size:10.5px;font-family:'JetBrains Mono',monospace;color:var(--accent,#5fe3b0);opacity:.001;animation:winActivate 6.5s ease-in-out infinite">● opened by jump</span>
+        </div>
+        <div style="padding:12px 0;font-family:'JetBrains Mono',monospace;font-size:14px;line-height:28px">
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">40</span><span style="white-space:pre"> </span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">41</span><span style="white-space:pre"><span style="color:#c79bf0">export</span> <span style="color:#c79bf0">function</span> <span style="color:#e8c785">useCanvasViewportQuery</span><span style="color:#c4ccd4">() {</span></span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">42</span><span style="white-space:pre;color:#c4ccd4">  <span style="color:#c79bf0">return</span> <span style="color:#e8c785">useQuery</span>(canvasViewportKey)</span></div>
+          <div style="display:flex;height:28px;align-items:center"><span style="width:42px;text-align:right;padding-right:14px;color:#3c4651;user-select:none">43</span><span style="white-space:pre;color:#c4ccd4">}</span></div>
+        </div>
+      </div>
 
-        if (xLink) {
-          xLink.href = `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`;
-        }
+      <!-- ===== OVERLAYS (absolute to the two-file stack) ===== -->
+      <!-- source highlight band (file A, line 3) -->
+      <div style="position:absolute;left:8px;right:8px;top:108px;height:28px;border-radius:7px;background:rgba(91,198,255,.13);border-left:2px solid #5bc6ff;animation:srcGlow 6.5s ease-in-out infinite"></div>
+      <!-- destination highlight band (file B, line 41) -->
+      <div style="position:absolute;left:8px;right:8px;top:378px;height:28px;border-radius:7px;background:color-mix(in srgb, var(--accent,#5fe3b0) 16%, transparent);border-left:2px solid var(--accent,#5fe3b0);box-shadow:0 0 26px -4px color-mix(in srgb, var(--accent,#5fe3b0) 55%, transparent);animation:dstGlow 6.5s ease-in-out infinite"></div>
 
-        if (bskyLink) {
-          bskyLink.href = `https://bsky.app/intent/compose?text=${encodeURIComponent(`${shareText} ${currentUrl}`)}`;
-        }
-      }
+      <!-- file B activation outline -->
+      <div style="position:absolute;left:0;right:0;top:298px;height:176px;border-radius:13px;border:1px solid color-mix(in srgb, var(--accent,#5fe3b0) 55%, transparent);box-shadow:0 0 38px -10px color-mix(in srgb, var(--accent,#5fe3b0) 60%, transparent);pointer-events:none;animation:winActivate 6.5s ease-in-out infinite"></div>
 
-      const copyButton = document.querySelector("[data-copy-button]");
-      if (copyButton) {
-        copyButton.addEventListener("click", () => copyInstallCommand(copyButton));
-      }
+      <!-- connector across the gap -->
+      <div style="position:absolute;left:23px;top:122px;width:2px;height:286px;transform-origin:top;background:linear-gradient(#5bc6ff,var(--accent,#5fe3b0));border-radius:2px;opacity:.85;animation:gapDraw 6.5s ease-in-out infinite"></div>
+      <!-- travelling dot -->
+      <div style="position:absolute;width:12px;height:12px;border-radius:50%;background:var(--accent,#5fe3b0);box-shadow:0 0 16px var(--accent,#5fe3b0);animation:jumpDot 6.5s ease-in-out infinite"></div>
 
-      setShareLinks();
-    </script>
-  </body>
+      <!-- F12 label by the source -->
+      <div style="position:absolute;top:78px;right:14px;display:flex;align-items:center;gap:8px;background:#1a2026;border:1px solid rgba(91,198,255,.4);border-radius:9px;padding:7px 11px;font-size:11.5px;color:#cdd5dd;box-shadow:0 8px 24px -8px rgba(0,0,0,.6);animation:labelIn 6.5s ease-in-out infinite">
+        <kbd style="font-family:'JetBrains Mono',monospace;background:#0d1115;border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:2px 6px;color:#5bc6ff">F12</kbd>
+        Go to Definition
+      </div>
+      <!-- resolved tag by destination -->
+      <div style="position:absolute;top:348px;right:14px;display:flex;align-items:center;gap:7px;background:color-mix(in srgb, var(--accent,#5fe3b0) 14%, #131a18);border:1px solid color-mix(in srgb, var(--accent,#5fe3b0) 45%, transparent);border-radius:9px;padding:7px 11px;font-size:11.5px;color:var(--accent,#5fe3b0);font-weight:600;animation:tagIn 6.5s ease-in-out infinite">▸ jumped to queries.ts · no import</div>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section style="max-width:1180px;margin:0 auto;padding:70px 32px 20px">
+    <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
+      <h2 style="font-size:34px;letter-spacing:-.02em;font-weight:700;margin:0">Documentation shouldn't be dependency wiring</h2>
+    </div>
+    <p style="font-size:17px;color:#aeb8c2;line-height:1.6;max-width:680px;margin:16px 0 36px">To make a JSDoc link resolve, you can import a type or value purely so TypeScript can see it. That works — but it turns a comment into plumbing, and fights organize-imports and lint rules. This extension lets the comment stay a comment.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px">
+      <div style="border:1px solid rgba(255,80,80,.22);border-radius:14px;background:#0f1115;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.06)">
+          <span style="font-size:13px;font-weight:600;color:#ff7a7a">The workaround</span>
+          <span style="font-size:12px;color:#7d8893;font-family:'JetBrains Mono',monospace">import just to navigate</span>
+        </div>
+        <pre style="margin:0;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.85;color:#c4ccd4;white-space:pre-wrap"><span style="color:#c79bf0">import type</span> { useCanvasViewportQuery } <span style="color:#c79bf0">from</span> <span style="color:#8fd49a">'./queries'</span>
+
+<span style="color:#5d6b78">/**
+ * See {@link <span style="color:#5bc6ff">useCanvasViewportQuery</span>}.
+ */</span></pre>
+        <div style="padding:0 20px 16px;font-size:13px;color:#8893a0;line-height:1.5">An import added <i>only</i> so navigation works. Auto-organize can strip it; lint can flag it.</div>
+      </div>
+
+      <div style="border:1px solid color-mix(in srgb, var(--accent,#5fe3b0) 35%, transparent);border-radius:14px;background:#0f1517;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.06)">
+          <span style="font-size:13px;font-weight:600;color:var(--accent,#5fe3b0)">With the extension</span>
+          <span style="font-size:12px;color:#7d8893;font-family:'JetBrains Mono',monospace">just a comment</span>
+        </div>
+        <pre style="margin:0;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.85;color:#c4ccd4;white-space:pre-wrap"><span style="color:#5d6b78">/**
+ * See {@link <span style="color:#5bc6ff">useCanvasViewportQuery</span>}.
+ */</span>
+<span style="color:#c79bf0">export function</span> <span style="color:#e8c785">readDrawingSettings</span>() {
+  <span style="color:#5d6b78">// ...</span>
+}</pre>
+        <div style="padding:0 20px 16px;font-size:13px;color:#8893a0;line-height:1.5">Cursor in the link target → <b style="color:#cdd5dd">Go to Definition</b> resolves the symbol from your workspace. No import.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SUPPORTS -->
+  <section style="max-width:1180px;margin:0 auto;padding:64px 32px 20px">
+    <h2 style="font-size:34px;letter-spacing:-.02em;font-weight:700;margin:0 0 6px">Recognizes the link forms you already write</h2>
+    <p style="font-size:16px;color:#9aa4ae;margin:0 0 30px">Inline JSDoc links, in every shape — active across TypeScript, TSX, JavaScript, and JSX.</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:12px;background:#0f1216;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:14px;color:#c4ccd4">{@link <span style="color:#5bc6ff">SymbolName</span>}</div>
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:12px;background:#0f1216;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:14px;color:#c4ccd4">{@link <span style="color:#8fd49a">'SymbolName'</span>}</div>
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:12px;background:#0f1216;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:14px;color:#c4ccd4">{@link <span style="color:#8fd49a">"SymbolName"</span>}</div>
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:12px;background:#0f1216;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:14px;color:#c4ccd4">{@link <span style="color:#e8c785">Namespace</span>.<span style="color:#5bc6ff">SymbolName</span>}</div>
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:12px;background:#0f1216;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:14px;color:#c4ccd4">{@linkplain <span style="color:#5bc6ff">SymbolName</span>}</div>
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:12px;background:#0f1216;padding:18px 20px;font-family:'JetBrains Mono',monospace;font-size:14px;color:#c4ccd4">{@linkcode <span style="color:#5bc6ff">SymbolName</span>}</div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <span style="font-size:13px;color:#9aa4ae;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:7px 15px;font-family:'JetBrains Mono',monospace">TypeScript</span>
+      <span style="font-size:13px;color:#9aa4ae;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:7px 15px;font-family:'JetBrains Mono',monospace">TSX</span>
+      <span style="font-size:13px;color:#9aa4ae;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:7px 15px;font-family:'JetBrains Mono',monospace">JavaScript</span>
+      <span style="font-size:13px;color:#9aa4ae;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:7px 15px;font-family:'JetBrains Mono',monospace">JSX</span>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section style="max-width:1180px;margin:0 auto;padding:64px 32px 20px">
+    <h2 style="font-size:34px;letter-spacing:-.02em;font-weight:700;margin:0 0 30px">A lookup that stays intentionally simple</h2>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:14px;background:#0f1216;padding:26px 24px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent,#5fe3b0);margin-bottom:14px">01</div>
+        <div style="font-size:18px;font-weight:600;margin-bottom:8px">Exact match first</div>
+        <p style="font-size:14.5px;color:#9aa4ae;line-height:1.6;margin:0">Ask VS Code's workspace symbol provider for an exact match on the link target.</p>
+      </div>
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:14px;background:#0f1216;padding:26px 24px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent,#5fe3b0);margin-bottom:14px">02</div>
+        <div style="font-size:18px;font-weight:600;margin-bottom:8px">Fall back to the AST</div>
+        <p style="font-size:14.5px;color:#9aa4ae;line-height:1.6;margin:0">If that misses, scan TypeScript and JavaScript files with the TypeScript AST — handy when the symbol isn't indexed yet.</p>
+      </div>
+      <div style="border:1px solid rgba(255,255,255,.09);border-radius:14px;background:#0f1216;padding:26px 24px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent,#5fe3b0);margin-bottom:14px">03</div>
+        <div style="font-size:18px;font-weight:600;margin-bottom:8px">Skip the noise</div>
+        <p style="font-size:14.5px;color:#9aa4ae;line-height:1.6;margin:0">Ignore generated and dependency folders: <span style="font-family:'JetBrains Mono',monospace;color:#c4ccd4">node_modules</span>, <span style="font-family:'JetBrains Mono',monospace;color:#c4ccd4">dist</span>, <span style="font-family:'JetBrains Mono',monospace;color:#c4ccd4">out</span>, <span style="font-family:'JetBrains Mono',monospace;color:#c4ccd4">.next</span>, <span style="font-family:'JetBrains Mono',monospace;color:#c4ccd4">.git</span>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEMO VIDEO -->
+  <section style="max-width:1180px;margin:0 auto;padding:64px 32px 20px">
+    <h2 style="font-size:34px;letter-spacing:-.02em;font-weight:700;margin:0 0 22px">See the jump in a real editor</h2>
+    <div style="border-radius:16px;border:1px solid rgba(255,255,255,.1);overflow:hidden;background:#0e1216;box-shadow:0 40px 90px -40px rgba(0,0,0,.8)">
+      <video controls playsinline muted loop style="display:block;width:100%;height:auto;background:#0b0e11" src="/media/demo.mp4"></video>
+    </div>
+  </section>
+
+  <!-- SCOPE / HONESTY -->
+  <section style="max-width:1180px;margin:0 auto;padding:64px 32px 20px">
+    <div style="border:1px solid rgba(255,255,255,.09);border-radius:16px;background:linear-gradient(160deg,#0f1417,#0d1013);padding:40px 36px;display:grid;grid-template-columns:1.1fr 1fr;gap:40px;align-items:center">
+      <div>
+        <div style="font-size:13px;font-family:'JetBrains Mono',monospace;color:#7d8893;margin-bottom:12px">SCOPE</div>
+        <h3 style="font-size:27px;letter-spacing:-.02em;font-weight:700;margin:0 0 14px">What it doesn't try to solve</h3>
+        <p style="font-size:15.5px;color:#9aa4ae;line-height:1.65;margin:0 0 14px">It doesn't make relative <i>file</i> links native in TypeScript or VS Code — that lives in the long-running language-service discussion. This extension stays on the symbol-navigation side, which keeps it small and predictable.</p>
+        <a href="https://github.com/microsoft/TypeScript/issues/47718" style="font-size:14px;color:#5bc6ff;text-decoration:none;font-family:'JetBrains Mono',monospace">microsoft/TypeScript#47718 ↗</a>
+      </div>
+      <div style="border:1px solid rgba(255,255,255,.08);border-radius:12px;background:#0c0f12;padding:20px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.85;color:#5d6b78">/**
+ * See {@link <span style="color:#6b7682;text-decoration:line-through">./some-file.ts</span>}.
+ */
+<span style="color:#5d6b78;font-style:normal;display:block;margin-top:10px;color:#7d8893"># relative file path — out of scope</span></div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section style="max-width:1180px;margin:0 auto;padding:70px 32px 40px;text-align:center">
+    <h2 style="font-size:44px;letter-spacing:-.025em;font-weight:700;margin:0 0 12px">Keep the good habit low-friction.</h2>
+    <p style="font-size:17px;color:#9aa4ae;margin:0 auto 30px;max-width:520px">Documentation links should be cheap to write. Install it and run Go to Definition inside any supported JSDoc link.</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <a href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc" style="color:#06140f;background:var(--accent,#5fe3b0);text-decoration:none;padding:14px 24px;border-radius:11px;font-weight:600;font-size:15px">VS Code Marketplace</a>
+      <a href="https://open-vsx.org/extension/laststance/go-to-definition-for-jsdoc" style="color:#dbe2e9;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);text-decoration:none;padding:14px 22px;border-radius:11px;font-weight:500;font-size:15px">Open VSX</a>
+      <a href="https://github.com/laststance/go-to-definition-for-jsdoc" style="color:#dbe2e9;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);text-decoration:none;padding:14px 22px;border-radius:11px;font-weight:500;font-size:15px">GitHub</a>
+    </div>
+
+    <div style="margin-top:34px;display:flex;flex-direction:column;align-items:center;gap:14px">
+      <div style="font-size:12px;font-family:'JetBrains Mono',monospace;letter-spacing:.08em;color:#5d6b78;text-transform:uppercase">Share it with a fellow dev</div>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="{{ shareX }}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:9px;color:#dbe2e9;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);text-decoration:none;padding:11px 18px;border-radius:11px;font-weight:500;font-size:14px" style-hover="border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.07)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg>
+          Share on X
+        </a>
+        <a href="{{ shareBsky }}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:9px;color:#dbe2e9;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);text-decoration:none;padding:11px 18px;border-radius:11px;font-weight:500;font-size:14px" style-hover="border-color:rgba(91,198,255,.45);background:rgba(91,198,255,.08)">
+          <svg width="16" height="16" viewBox="0 0 600 530" fill="#5bc6ff" aria-hidden="true"><path d="M135.72 44.03C202.216 93.951 273.74 195.17 300 249.49c26.262-54.316 97.782-155.54 164.28-205.46C512.26 8.009 590-19.862 590 68.825c0 17.712-10.155 148.79-16.111 170.07-20.703 73.984-96.144 92.854-163.25 81.433 117.3 19.964 147.14 86.092 82.697 152.22-122.39 125.59-175.91-31.511-189.63-71.766-2.514-7.38-3.69-10.832-3.708-7.896-.017-2.936-1.193.516-3.707 7.896-13.714 40.255-67.233 197.36-189.63 71.766-64.444-66.128-34.605-132.26 82.697-152.22-67.108 11.421-142.55-7.45-163.25-81.433C20.155 217.611 10 86.535 10 68.825c0-88.687 77.742-60.816 125.72-24.795z"></path></svg>
+          Share on Bluesky
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer style="max-width:1180px;margin:0 auto;padding:30px 32px 50px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap">
+    <div style="font-size:13.5px;color:#7d8893">Go To Definition for JSDoc · v0.0.3 — by <a href="https://laststance.io" style="color:#aab4be;text-decoration:none">Ryota Murakami · Laststance.io</a></div>
+    <div style="font-size:13px;color:#5d6b78;font-family:'JetBrains Mono',monospace">{ } let the comment stay a comment</div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:900},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;oklch(0.84 0.15 158)&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;oklch(0.84 0.15 158)&quot;,&quot;oklch(0.82 0.15 230)&quot;,&quot;oklch(0.8 0.15 300)&quot;,&quot;oklch(0.85 0.16 95)&quot;]}}">
+class Component extends DCLogic {
+  state = { copied: false };
+  renderVals() {
+    const url = 'https://laststance.io/articles/Go-To-Definition-for-JSDoc-Released';
+    const text = 'Go To Definition for JSDoc — jump to {@link} symbols in VS Code without adding throwaway imports.';
+    return {
+      shareX: 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) + '&url=' + encodeURIComponent(url),
+      shareBsky: 'https://bsky.app/intent/compose?text=' + encodeURIComponent(text + ' ' + url),
+      accent: this.props.accent ?? 'oklch(0.84 0.15 158)',
+      copyLabel: this.state.copied ? 'Copied ✓' : 'Copy',
+      copy: () => {
+        try { navigator.clipboard && navigator.clipboard.writeText('code --install-extension laststance.go-to-definition-for-jsdoc'); } catch (e) {}
+        this.setState({ copied: true });
+        clearTimeout(this._t);
+        this._t = setTimeout(() => this.setState({ copied: false }), 1600);
+      },
+    };
+  }
+}
+</script>
+</body>
 </html>
