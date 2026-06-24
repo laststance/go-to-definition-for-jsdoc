@@ -1,0 +1,945 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Go To Definition for JSDoc</title>
+    <meta
+      name="description"
+      content="Jump from JSDoc {@link} references to TypeScript and JavaScript workspace symbols in VS Code without adding throwaway imports."
+    />
+    <meta property="og:title" content="Go To Definition for JSDoc" />
+    <meta
+      property="og:description"
+      content="A tiny VS Code extension that keeps JSDoc links navigable without turning comments into dependency wiring."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/media/demo.gif" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/images/icon.png" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --page: #090d11;
+        --surface: #10161c;
+        --surface-strong: #141d24;
+        --line: rgba(232, 238, 244, 0.12);
+        --line-strong: rgba(232, 238, 244, 0.24);
+        --text: #eef4f7;
+        --muted: #a7b3bd;
+        --soft: #74818d;
+        --mint: #66e6ad;
+        --sky: #5bc6ff;
+        --coral: #ff7d70;
+        --amber: #f5c35f;
+        --radius: 8px;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(91, 198, 255, 0.08), transparent 32rem),
+          var(--page);
+        color: var(--text);
+        font-family: var(--sans);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      code,
+      kbd,
+      pre {
+        font-family: var(--mono);
+      }
+
+      .site-shell {
+        min-height: 100vh;
+        overflow: hidden;
+      }
+
+      .topbar {
+        position: fixed;
+        z-index: 20;
+        top: 0;
+        right: 0;
+        left: 0;
+        border-bottom: 1px solid rgba(232, 238, 244, 0.08);
+        background: rgba(9, 13, 17, 0.78);
+        backdrop-filter: blur(18px);
+      }
+
+      .topbar-inner {
+        display: flex;
+        max-width: 1180px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin: 0 auto;
+        padding: 0.85rem 1.25rem;
+      }
+
+      .brand {
+        display: inline-flex;
+        min-width: 0;
+        align-items: center;
+        gap: 0.7rem;
+        text-decoration: none;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 2.2rem;
+        height: 2.2rem;
+        flex: 0 0 auto;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #10171d;
+        color: var(--mint);
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        font-weight: 800;
+      }
+
+      .brand-text {
+        overflow: hidden;
+        font-size: 0.94rem;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .brand-text span {
+        color: var(--muted);
+        font-weight: 500;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .nav-link,
+      .button {
+        display: inline-flex;
+        min-height: 2.45rem;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        border-radius: var(--radius);
+        font-size: 0.9rem;
+        font-weight: 650;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .nav-link {
+        padding: 0 0.85rem;
+        color: var(--muted);
+      }
+
+      .nav-link:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .button {
+        border: 1px solid transparent;
+        padding: 0 1rem;
+        cursor: pointer;
+      }
+
+      .button-primary {
+        background: var(--mint);
+        color: #06140f;
+        box-shadow: 0 14px 34px -20px var(--mint);
+      }
+
+      .button-secondary {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.055);
+        color: var(--text);
+      }
+
+      .hero {
+        position: relative;
+        display: grid;
+        min-height: 86vh;
+        align-items: center;
+        padding: 6.25rem 1.25rem 4rem;
+        isolation: isolate;
+      }
+
+      .hero::after {
+        position: absolute;
+        z-index: -1;
+        inset: auto 0 0;
+        height: 36%;
+        background: linear-gradient(180deg, transparent, var(--page));
+        content: "";
+      }
+
+      .hero-media {
+        position: absolute;
+        z-index: -3;
+        inset: 0;
+        overflow: hidden;
+        background:
+          linear-gradient(90deg, rgba(9, 13, 17, 0.35), rgba(9, 13, 17, 0.1)),
+          url("/media/demo.gif") center / cover no-repeat,
+          #090d11;
+      }
+
+      .hero-media video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.68;
+      }
+
+      .hero-scrim {
+        position: absolute;
+        z-index: -2;
+        inset: 0;
+        background:
+          linear-gradient(90deg, rgba(9, 13, 17, 0.96) 0%, rgba(9, 13, 17, 0.7) 43%, rgba(9, 13, 17, 0.22) 100%),
+          linear-gradient(180deg, rgba(9, 13, 17, 0.78), rgba(9, 13, 17, 0.34) 45%, rgba(9, 13, 17, 0.82));
+      }
+
+      .hero-inner {
+        width: min(1180px, 100%);
+        margin: 0 auto;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.45rem 0.75rem;
+        background: rgba(16, 22, 28, 0.72);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.78rem;
+      }
+
+      .status-dot {
+        width: 0.48rem;
+        height: 0.48rem;
+        border-radius: 50%;
+        background: var(--mint);
+        box-shadow: 0 0 0 0.25rem rgba(102, 230, 173, 0.12);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 13ch;
+        margin-bottom: 1rem;
+        font-size: clamp(3.2rem, 6.6rem, 7.1vw);
+        line-height: 0.94;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 42rem;
+        margin-bottom: 1.65rem;
+        color: #c5d0d8;
+        font-size: 1.16rem;
+        line-height: 1.65;
+      }
+
+      .lead code {
+        color: var(--sky);
+        font-size: 0.94em;
+      }
+
+      .hero-actions,
+      .share-actions,
+      .install-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .install-row {
+        width: fit-content;
+        max-width: 100%;
+        margin-top: 1.25rem;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 0.45rem;
+        background: rgba(11, 16, 20, 0.86);
+        color: #cad4dc;
+        font-family: var(--mono);
+        font-size: 0.85rem;
+      }
+
+      .install-row span {
+        overflow-wrap: anywhere;
+        padding: 0.3rem 0.45rem 0.3rem 0.65rem;
+      }
+
+      .copy-button {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.06);
+        color: #dbe4ea;
+        font-family: var(--mono);
+        font-size: 0.78rem;
+      }
+
+      main {
+        background: var(--page);
+      }
+
+      .section {
+        width: min(1180px, calc(100% - 2.5rem));
+        margin: 0 auto;
+        padding: 4rem 0;
+      }
+
+      .section-heading {
+        max-width: 46rem;
+      }
+
+      h2 {
+        margin-bottom: 0.85rem;
+        font-size: clamp(2rem, 2.7rem, 4vw);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .section-heading p {
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.7;
+      }
+
+      .split-grid,
+      .feature-grid,
+      .steps-grid {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .split-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 2rem;
+      }
+
+      .feature-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 1.5rem;
+      }
+
+      .steps-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 1.7rem;
+      }
+
+      .panel,
+      .feature,
+      .step,
+      .scope-panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .panel {
+        overflow: hidden;
+      }
+
+      .panel[data-tone="problem"] {
+        border-color: rgba(255, 125, 112, 0.34);
+      }
+
+      .panel[data-tone="solution"] {
+        border-color: rgba(102, 230, 173, 0.36);
+        background: #0f1819;
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        border-bottom: 1px solid rgba(232, 238, 244, 0.08);
+        padding: 0.85rem 1rem;
+      }
+
+      .panel-title {
+        color: var(--mint);
+        font-size: 0.86rem;
+        font-weight: 800;
+      }
+
+      .panel[data-tone="problem"] .panel-title {
+        color: var(--coral);
+      }
+
+      .panel-kicker {
+        color: var(--soft);
+        font-family: var(--mono);
+        font-size: 0.76rem;
+      }
+
+      pre {
+        margin: 0;
+        overflow-x: auto;
+        padding: 1rem;
+        color: #cfd9e0;
+        font-size: 0.85rem;
+        line-height: 1.8;
+        white-space: pre-wrap;
+      }
+
+      .token-comment {
+        color: #697784;
+      }
+
+      .token-keyword {
+        color: #c69df6;
+      }
+
+      .token-string {
+        color: #94d99b;
+      }
+
+      .token-symbol {
+        color: var(--sky);
+      }
+
+      .token-function {
+        color: var(--amber);
+      }
+
+      .panel-note {
+        margin: 0;
+        padding: 0 1rem 1rem;
+        color: var(--soft);
+        font-size: 0.86rem;
+        line-height: 1.6;
+      }
+
+      .feature {
+        min-height: 4.35rem;
+        padding: 1rem;
+        color: #cfd9e0;
+        font-family: var(--mono);
+        font-size: 0.9rem;
+        line-height: 1.45;
+      }
+
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        margin-top: 1rem;
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.45rem 0.75rem;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.78rem;
+      }
+
+      .step {
+        padding: 1.25rem;
+      }
+
+      .step-number {
+        margin-bottom: 1rem;
+        color: var(--mint);
+        font-family: var(--mono);
+        font-size: 0.82rem;
+      }
+
+      h3 {
+        margin-bottom: 0.45rem;
+        font-size: 1.1rem;
+      }
+
+      .step p,
+      .scope-panel p {
+        margin-bottom: 0;
+        color: var(--muted);
+        font-size: 0.94rem;
+        line-height: 1.65;
+      }
+
+      .demo-frame {
+        overflow: hidden;
+        margin-top: 1.4rem;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        background: #070b0f;
+        box-shadow: 0 34px 80px -44px rgba(0, 0, 0, 0.9);
+      }
+
+      .demo-frame video {
+        display: block;
+        width: 100%;
+        height: auto;
+        background: #070b0f;
+      }
+
+      .scope-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(16rem, 0.92fr);
+        gap: 1.5rem;
+        align-items: center;
+        padding: 1.5rem;
+        background: linear-gradient(135deg, #11181e, #0c1014);
+      }
+
+      .scope-label {
+        margin-bottom: 0.7rem;
+        color: var(--soft);
+        font-family: var(--mono);
+        font-size: 0.76rem;
+      }
+
+      .scope-panel a {
+        display: inline-flex;
+        margin-top: 1rem;
+        color: var(--sky);
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        text-decoration: none;
+      }
+
+      .scope-code {
+        border: 1px solid rgba(232, 238, 244, 0.08);
+        border-radius: var(--radius);
+        background: #090d11;
+      }
+
+      .final-cta {
+        text-align: center;
+      }
+
+      .final-cta p {
+        max-width: 36rem;
+        margin: 0 auto 1.5rem;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .final-cta .hero-actions,
+      .share-actions {
+        justify-content: center;
+      }
+
+      .share-label {
+        margin: 2rem 0 0.9rem;
+        color: var(--soft);
+        font-family: var(--mono);
+        font-size: 0.76rem;
+        text-transform: uppercase;
+      }
+
+      footer {
+        border-top: 1px solid rgba(232, 238, 244, 0.08);
+      }
+
+      .footer-inner {
+        display: flex;
+        width: min(1180px, calc(100% - 2.5rem));
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin: 0 auto;
+        padding: 1.5rem 0 2rem;
+        color: var(--soft);
+        font-size: 0.84rem;
+      }
+
+      .footer-inner a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+
+      @media (max-width: 860px) {
+        .nav-links .nav-link {
+          display: none;
+        }
+
+        .hero {
+          min-height: 88svh;
+          padding-top: 5.4rem;
+        }
+
+        .hero-media video {
+          object-position: 58% center;
+          opacity: 0.5;
+        }
+
+        .hero-scrim {
+          background:
+            linear-gradient(90deg, rgba(9, 13, 17, 0.96), rgba(9, 13, 17, 0.7)),
+            linear-gradient(180deg, rgba(9, 13, 17, 0.76), rgba(9, 13, 17, 0.82));
+        }
+
+        h1 {
+          max-width: 11ch;
+          font-size: 3.45rem;
+        }
+
+        .split-grid,
+        .feature-grid,
+        .steps-grid,
+        .scope-panel {
+          grid-template-columns: 1fr;
+        }
+
+        .section {
+          padding: 3rem 0;
+        }
+
+        .footer-inner {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .topbar-inner,
+        .section,
+        .footer-inner {
+          width: calc(100% - 1.5rem);
+        }
+
+        .topbar-inner {
+          padding-right: 0;
+          padding-left: 0;
+        }
+
+        .brand-text {
+          max-width: 12.8rem;
+        }
+
+        .hero {
+          padding-right: 0.75rem;
+          padding-left: 0.75rem;
+        }
+
+        h1 {
+          font-size: 2.7rem;
+        }
+
+        .lead {
+          font-size: 1rem;
+        }
+
+        .button {
+          width: 100%;
+        }
+
+        .install-row {
+          width: 100%;
+        }
+
+        .copy-button {
+          width: auto;
+          margin-left: auto;
+        }
+
+        .panel-header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="topbar">
+        <div class="topbar-inner">
+          <a class="brand" href="#top" aria-label="Go To Definition for JSDoc home">
+            <span class="brand-mark">{ }</span>
+            <span class="brand-text">Go To Definition <span>for JSDoc</span></span>
+          </a>
+          <nav class="nav-links" aria-label="Primary navigation">
+            <a class="nav-link" href="https://github.com/laststance/go-to-definition-for-jsdoc">GitHub</a>
+            <a class="nav-link" href="https://open-vsx.org/extension/laststance/go-to-definition-for-jsdoc">Open VSX</a>
+            <a
+              class="button button-primary"
+              href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc"
+            >
+              Install
+            </a>
+          </nav>
+        </div>
+      </header>
+
+      <section id="top" class="hero" aria-labelledby="hero-title">
+        <div class="hero-media" aria-hidden="true">
+          <video autoplay muted loop playsinline poster="/media/demo.gif">
+            <source src="/media/demo.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <div class="hero-scrim" aria-hidden="true"></div>
+        <div class="hero-inner">
+          <p class="eyebrow"><span class="status-dot"></span>VS Code Extension · v0.0.3</p>
+          <h1 id="hero-title">Go To Definition for JSDoc</h1>
+          <p class="lead">
+            Jump from JSDoc <code>{@link}</code> references to workspace symbols in VS Code,
+            without adding throwaway imports just to navigate.
+          </p>
+          <div class="hero-actions">
+            <a
+              class="button button-primary"
+              href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc"
+            >
+              Get it on the Marketplace
+            </a>
+            <a class="button button-secondary" href="https://github.com/laststance/go-to-definition-for-jsdoc">
+              View source
+            </a>
+          </div>
+          <div class="install-row" aria-label="Install command">
+            <span>$ code --install-extension laststance.go-to-definition-for-jsdoc</span>
+            <button class="button copy-button" type="button" data-copy-button>Copy</button>
+          </div>
+        </div>
+      </section>
+
+      <main>
+        <section class="section" aria-labelledby="problem-title">
+          <div class="section-heading">
+            <h2 id="problem-title">Documentation should not become dependency wiring</h2>
+            <p>
+              A JSDoc link can force you to import a type or value purely so TypeScript can
+              see it. That works, but it turns a comment into plumbing and fights organize imports.
+            </p>
+          </div>
+          <div class="split-grid">
+            <article class="panel" data-tone="problem">
+              <div class="panel-header">
+                <div class="panel-title">The workaround</div>
+                <div class="panel-kicker">import just to navigate</div>
+              </div>
+              <pre><code><span class="token-keyword">import type</span> { useCanvasViewportQuery } <span class="token-keyword">from</span> <span class="token-string">'./queries'</span>
+
+<span class="token-comment">/**
+ * See {@link <span class="token-symbol">useCanvasViewportQuery</span>}.
+ */</span></code></pre>
+              <p class="panel-note">
+                An import added only so navigation works. Auto organize can strip it; lint can flag it.
+              </p>
+            </article>
+
+            <article class="panel" data-tone="solution">
+              <div class="panel-header">
+                <div class="panel-title">With the extension</div>
+                <div class="panel-kicker">just a comment</div>
+              </div>
+              <pre><code><span class="token-comment">/**
+ * See {@link <span class="token-symbol">useCanvasViewportQuery</span>}.
+ */</span>
+<span class="token-keyword">export function</span> <span class="token-function">readDrawingSettings</span>() {
+  <span class="token-comment">// ...</span>
+}</code></pre>
+              <p class="panel-note">
+                Put the cursor in the link target, run Go to Definition, and land on the symbol.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="links-title">
+          <div class="section-heading">
+            <h2 id="links-title">Recognizes the link forms you already write</h2>
+            <p>Inline JSDoc links across TypeScript, TSX, JavaScript, and JSX.</p>
+          </div>
+          <div class="feature-grid">
+            <div class="feature">{@link <span class="token-symbol">SymbolName</span>}</div>
+            <div class="feature">{@link <span class="token-string">'SymbolName'</span>}</div>
+            <div class="feature">{@link <span class="token-string">"SymbolName"</span>}</div>
+            <div class="feature">{@link <span class="token-function">Namespace</span>.<span class="token-symbol">SymbolName</span>}</div>
+            <div class="feature">{@linkplain <span class="token-symbol">SymbolName</span>}</div>
+            <div class="feature">{@linkcode <span class="token-symbol">SymbolName</span>}</div>
+          </div>
+          <div class="chip-row" aria-label="Supported languages">
+            <span class="chip">TypeScript</span>
+            <span class="chip">TSX</span>
+            <span class="chip">JavaScript</span>
+            <span class="chip">JSX</span>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="lookup-title">
+          <div class="section-heading">
+            <h2 id="lookup-title">A lookup that stays intentionally simple</h2>
+          </div>
+          <div class="steps-grid">
+            <article class="step">
+              <div class="step-number">01</div>
+              <h3>Exact match first</h3>
+              <p>Ask VS Code's workspace symbol provider for an exact match on the link target.</p>
+            </article>
+            <article class="step">
+              <div class="step-number">02</div>
+              <h3>Fall back to the AST</h3>
+              <p>Scan TypeScript and JavaScript files when the symbol provider has no result yet.</p>
+            </article>
+            <article class="step">
+              <div class="step-number">03</div>
+              <h3>Skip generated noise</h3>
+              <p>Ignore dependency and output folders like node_modules, dist, out, .next, and .git.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="demo-title">
+          <div class="section-heading">
+            <h2 id="demo-title">See the jump in a real editor</h2>
+            <p>The page uses the same shipped demo asset as the README, so the landing page matches the extension's public proof.</p>
+          </div>
+          <div class="demo-frame">
+            <video controls playsinline muted loop poster="/media/demo.gif">
+              <source src="/media/demo.mp4" type="video/mp4" />
+            </video>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="scope-title">
+          <div class="scope-panel">
+            <div>
+              <div class="scope-label">SCOPE</div>
+              <h2 id="scope-title">What it does not try to solve</h2>
+              <p>
+                It does not make relative file links native in TypeScript or VS Code. This extension stays
+                on symbol navigation, which keeps it small and predictable.
+              </p>
+              <a href="https://github.com/microsoft/TypeScript/issues/47718">microsoft/TypeScript#47718</a>
+            </div>
+            <div class="scope-code">
+              <pre><code><span class="token-comment">/**
+ * See {@link ./some-file.ts}.
+ */</span>
+<span class="token-comment"># relative file path: out of scope</span></code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="section final-cta" aria-labelledby="cta-title">
+          <h2 id="cta-title">Keep the good habit low-friction.</h2>
+          <p>
+            Documentation links should be cheap to write. Install it and run Go to Definition
+            inside any supported JSDoc link.
+          </p>
+          <div class="hero-actions">
+            <a
+              class="button button-primary"
+              href="https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc"
+            >
+              VS Code Marketplace
+            </a>
+            <a class="button button-secondary" href="https://open-vsx.org/extension/laststance/go-to-definition-for-jsdoc">
+              Open VSX
+            </a>
+            <a class="button button-secondary" href="https://github.com/laststance/go-to-definition-for-jsdoc">
+              GitHub
+            </a>
+          </div>
+          <div class="share-label">Share it with a fellow dev</div>
+          <div class="share-actions">
+            <a class="button button-secondary" data-share-x target="_blank" rel="noopener">Share on X</a>
+            <a class="button button-secondary" data-share-bsky target="_blank" rel="noopener">Share on Bluesky</a>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <div class="footer-inner">
+          <div>
+            Go To Definition for JSDoc · v0.0.3 · by
+            <a href="https://laststance.io">Ryota Murakami · Laststance.io</a>
+          </div>
+          <div><code>{ }</code> let the comment stay a comment</div>
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      const installCommand = "code --install-extension laststance.go-to-definition-for-jsdoc";
+      const shareUrl = "https://laststance.io/articles/Go-To-Definition-for-JSDoc-Released";
+      const shareText =
+        "Go To Definition for JSDoc - jump to {@link} symbols in VS Code without adding throwaway imports.";
+
+      /**
+       * Copies the install command after the install row button is pressed.
+       * @param {HTMLButtonElement} button Button that receives temporary copied feedback.
+       * @returns {Promise<void>} Resolves after clipboard handling and UI feedback finish.
+       * @example copyInstallCommand(document.querySelector("[data-copy-button]"))
+       */
+      async function copyInstallCommand(button) {
+        try {
+          await navigator.clipboard.writeText(installCommand);
+          button.textContent = "Copied";
+        } catch (_error) {
+          // Clipboard can be blocked in local file previews, so keep a helpful manual fallback.
+          button.textContent = "Select text";
+        }
+
+        window.setTimeout(() => {
+          button.textContent = "Copy";
+        }, 1600);
+      }
+
+      /**
+       * Builds social intent URLs once the static page knows its deploy context.
+       * @returns {void} Updates share anchors in place.
+       * @example setShareLinks()
+       */
+      function setShareLinks() {
+        const xLink = document.querySelector("[data-share-x]");
+        const bskyLink = document.querySelector("[data-share-bsky]");
+        const currentUrl = window.location.origin === "null" ? shareUrl : window.location.href;
+        const encodedUrl = encodeURIComponent(currentUrl);
+        const encodedText = encodeURIComponent(shareText);
+
+        if (xLink) {
+          xLink.href = `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`;
+        }
+
+        if (bskyLink) {
+          bskyLink.href = `https://bsky.app/intent/compose?text=${encodeURIComponent(`${shareText} ${currentUrl}`)}`;
+        }
+      }
+
+      const copyButton = document.querySelector("[data-copy-button]");
+      if (copyButton) {
+        copyButton.addEventListener("click", () => copyInstallCommand(copyButton));
+      }
+
+      setShareLinks();
+    </script>
+  </body>
+</html>
