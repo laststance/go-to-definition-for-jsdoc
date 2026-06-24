@@ -14,8 +14,9 @@
       content="A tiny VS Code extension that keeps JSDoc links navigable without turning comments into dependency wiring."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/media/demo.gif" />
+    <meta property="og:image" content="https://go-to-definition-for-jsdoc.vercel.app/media/demo.gif" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://go-to-definition-for-jsdoc.vercel.app/media/demo.gif" />
     <link rel="icon" href="/images/icon.png" />
     <style>
       :root {
@@ -198,10 +199,7 @@
         z-index: -3;
         inset: 0;
         overflow: hidden;
-        background:
-          linear-gradient(90deg, rgba(9, 13, 17, 0.35), rgba(9, 13, 17, 0.1)),
-          url("/media/demo.gif") center / cover no-repeat,
-          #090d11;
+        background: #090d11;
       }
 
       .hero-media video {
@@ -256,7 +254,7 @@
       h1 {
         max-width: 13ch;
         margin-bottom: 1rem;
-        font-size: clamp(3.2rem, 6.6rem, 7.1vw);
+        font-size: clamp(3.2rem, 7.1vw, 6.6rem);
         line-height: 0.94;
         letter-spacing: 0;
       }
@@ -325,7 +323,7 @@
 
       h2 {
         margin-bottom: 0.85rem;
-        font-size: clamp(2rem, 2.7rem, 4vw);
+        font-size: clamp(2rem, 4vw, 2.7rem);
         line-height: 1.08;
         letter-spacing: 0;
       }
@@ -723,7 +721,7 @@
             </a>
           </div>
           <div class="install-row" aria-label="Install command">
-            <span>$ code --install-extension laststance.go-to-definition-for-jsdoc</span>
+            <span data-install-command>$ code --install-extension laststance.go-to-definition-for-jsdoc</span>
             <button class="button copy-button" type="button" data-copy-button>Copy</button>
           </div>
         </div>
@@ -904,7 +902,17 @@
           await navigator.clipboard.writeText(installCommand);
           button.textContent = "Copied";
         } catch (_error) {
-          // Clipboard can be blocked in local file previews, so keep a helpful manual fallback.
+          // Clipboard can be blocked in local previews, so highlight the command for manual copy.
+          const command = document.querySelector("[data-install-command]");
+          if (command) {
+            const range = document.createRange();
+            range.selectNodeContents(command);
+            const selection = window.getSelection();
+            if (selection) {
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          }
           button.textContent = "Select text";
         }
 
