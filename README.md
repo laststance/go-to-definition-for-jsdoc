@@ -2,6 +2,12 @@
 
 Go To Definition for JSDoc makes inline documentation links jump to TypeScript workspace symbols even when the current file does not import the symbol.
 
+## Why This Exists
+
+This extension is a practical solution to the frustration described in [microsoft/TypeScript#47718 — Provide way to link to other files from JSDoc comments](https://github.com/microsoft/TypeScript/issues/47718): make symbol-name JSDoc links work with Go to Definition today, without adding throwaway imports just for navigation.
+
+It focuses on the everyday symbol-navigation case rather than replacing native relative-file links or TypeScript protocol support.
+
 ## Install
 
 - [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=laststance.go-to-definition-for-jsdoc)
