@@ -2,6 +2,8 @@
 
 Go To Definition for JSDoc makes inline documentation links jump to TypeScript workspace symbols even when the current file does not import the symbol.
 
+[![Go To Definition for JSDoc demo](./media/demo.gif)](./media/demo.mp4)
+
 ## Why This Exists
 
 This extension is a practical solution to the frustration described in [microsoft/TypeScript#47718 — Provide way to link to other files from JSDoc comments](https://github.com/microsoft/TypeScript/issues/47718): make symbol-name JSDoc links work with Go to Definition today, without adding throwaway imports just for navigation.
@@ -18,12 +20,6 @@ It focuses on the everyday symbol-navigation case rather than replacing native r
 - Jump from JSDoc inline links to workspace TypeScript symbols.
 - Supports unimported symbols such as `{@link 'useReadableDrawingItemSettingsQuery'}`.
 - Falls back to a TypeScript AST scan when VS Code's workspace symbol provider has no result.
-
-## Demo
-
-[![Go To Definition for JSDoc demo](./media/demo.gif)](./media/demo.mp4)
-
-[Watch the MP4 demo](./media/demo.mp4)
 
 ## Usage
 
