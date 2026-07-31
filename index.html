@@ -241,19 +241,26 @@ html,body{margin:0;padding:0;background:#0b0e11;color:#e7ecf1;font-family:'Space
     </div>
   </section>
 
-  <!-- SCOPE / HONESTY -->
+  <!-- WHY / NATIVE GAP -->
   <section style="max-width:1180px;margin:0 auto;padding:64px 32px 20px">
     <div style="border:1px solid rgba(255,255,255,.09);border-radius:16px;background:linear-gradient(160deg,#0f1417,#0d1013);padding:40px 36px;display:grid;grid-template-columns:1.1fr 1fr;gap:40px;align-items:center">
       <div>
-        <div style="font-size:13px;font-family:'JetBrains Mono',monospace;color:#7d8893;margin-bottom:12px">SCOPE</div>
-        <h3 style="font-size:27px;letter-spacing:-.02em;font-weight:700;margin:0 0 14px">What it doesn't try to solve</h3>
-        <p style="font-size:15.5px;color:#9aa4ae;line-height:1.65;margin:0 0 14px">It doesn't make relative <i>file</i> links native in TypeScript or VS Code — that lives in the long-running language-service discussion. This extension stays on the symbol-navigation side, which keeps it small and predictable.</p>
+        <div style="font-size:13px;font-family:'JetBrains Mono',monospace;color:#7d8893;margin-bottom:12px">WHY</div>
+        <h3 style="font-size:27px;letter-spacing:-.02em;font-weight:700;margin:0 0 14px">Native {@link} stops at imports</h3>
+        <p style="font-size:15.5px;color:#9aa4ae;line-height:1.65;margin:0 0 14px">VS Code already supports Go to Definition on <code style="font-family:'JetBrains Mono',monospace;font-size:13.5px;color:#5bc6ff">{@link anySymbol}</code> when that symbol is imported in the current file. Without an import, the jump fails — so the notation is barely useful for real documentation.</p>
+        <p style="font-size:15.5px;color:#9aa4ae;line-height:1.65;margin:0 0 14px">This extension fills that gap: resolve workspace symbols even when they aren't imported. Editor navigation for JSDoc links has been discussed for years in <a href="https://github.com/microsoft/TypeScript/issues/47718" style="color:#5bc6ff;text-decoration:none">microsoft/TypeScript#47718</a>, but progress stalled — so this exists as a practical fix today.</p>
         <a href="https://github.com/microsoft/TypeScript/issues/47718" style="font-size:14px;color:#5bc6ff;text-decoration:none;font-family:'JetBrains Mono',monospace">microsoft/TypeScript#47718 ↗</a>
       </div>
-      <div style="border:1px solid rgba(255,255,255,.08);border-radius:12px;background:#0c0f12;padding:20px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.85;color:#5d6b78">/**
- * See {@link <span style="color:#6b7682;text-decoration:line-through">./some-file.ts</span>}.
- */
-<span style="color:#5d6b78;font-style:normal;display:block;margin-top:10px;color:#7d8893"># relative file path — out of scope</span></div>
+      <div style="border:1px solid rgba(255,255,255,.08);border-radius:12px;background:#0c0f12;padding:20px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.85;color:#c4ccd4"><span style="color:#c79bf0">import</span> { anySymbol } <span style="color:#c79bf0">from</span> <span style="color:#8fd49a">'./foo'</span>
+<span style="color:#5d6b78">/**
+ * {@link <span style="color:#5bc6ff">anySymbol</span>}
+ */</span>
+<span style="color:#5d6b78;display:block;margin-top:10px"># native — imported symbol ✓</span>
+
+<span style="color:#5d6b78;display:block;margin-top:14px">/**
+ * {@link <span style="color:var(--accent,#5fe3b0)">otherSymbol</span>}
+ */</span>
+<span style="color:#5d6b78;display:block;margin-top:10px"># unimported — needs this extension</span></div>
     </div>
   </section>
 
