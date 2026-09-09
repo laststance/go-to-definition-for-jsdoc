@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import { findSymbolDefinitionsInSourceText } from './sourceSymbolParser'
 
 describe('findSymbolDefinitionsInSourceText', () => {
-  it('finds variables and types so fallback lookup can jump when workspace symbols are missing', () => {
+  test('finds variables and types so fallback lookup can jump when workspace symbols are missing', () => {
     // Arrange
     const sourceText = [
       'export const useReadableDrawingItemSettingsQuery = () => undefined',

@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import { findJsDocLinkTargetAtPosition } from './jsDocLink'
 
 describe('findJsDocLinkTargetAtPosition', () => {
-  it('captures quoted JSDoc link targets so Go to Definition can resolve unimported symbols', () => {
+  test('captures quoted JSDoc link targets so Go to Definition can resolve unimported symbols', () => {
     // Arrange
     const lineText = " * See {@link 'useReadableDrawingItemSettingsQuery'} for cache behavior."
 
@@ -18,7 +18,7 @@ describe('findJsDocLinkTargetAtPosition', () => {
     })
   })
 
-  it('ignores cursor positions outside the link target so normal editor navigation still owns them', () => {
+  test('ignores cursor positions outside the link target so normal editor navigation still owns them', () => {
     // Arrange
     const lineText = " * See {@link 'useReadableDrawingItemSettingsQuery'} for cache behavior."
 
@@ -29,7 +29,7 @@ describe('findJsDocLinkTargetAtPosition', () => {
     expect(linkTarget).toBeUndefined()
   })
 
-  it('captures unquoted link targets to preserve existing JSDoc link behavior', () => {
+  test('captures unquoted link targets to preserve existing JSDoc link behavior', () => {
     // Arrange
     const lineText = ' * See {@link ReadableDrawingItem label text}.'
 

@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import { createCandidateSymbolQueries } from './symbolName'
 
 describe('createCandidateSymbolQueries', () => {
-  it('keeps namespace target first then tries the final member name for workspace symbol lookup', () => {
+  test('keeps namespace target first then tries the final member name for workspace symbol lookup', () => {
     // Arrange
     const linkTarget = 'Namespace.useReadableDrawingItemSettingsQuery()'
 
@@ -17,7 +17,7 @@ describe('createCandidateSymbolQueries', () => {
     ])
   })
 
-  it('strips import type syntax so quoted type links can jump to the referenced type name', () => {
+  test('strips import type syntax so quoted type links can jump to the referenced type name', () => {
     // Arrange
     const linkTarget = 'import("./types").ReadableDrawingItem'
 
