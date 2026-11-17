@@ -75,12 +75,14 @@
     "vscode:prepublish": "pnpm run compile"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.6",
     "@types/vscode": "1.90.0",
-    "@vscode/vsce": "^3.6.0",
-    "esbuild": "^0.27.0",
-    "npm-run-all2": "^9.0.1",
-    "typescript": "^5.8.0",
-    "vitest": "^3.0.0"
-  }
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
+    "npm-run-all2": "^9.0.4",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^5.1.0"
+  },
+  "packageManager": "pnpm@12.21.0+sha512.66fd8278ee28935ce951792d34367ff3af5c432a2756445823029533835b8da529bbe0be5130afd56ed0713fb8789e47bad82d93bd5ae2fe54b15562d6276ef0"
 }
