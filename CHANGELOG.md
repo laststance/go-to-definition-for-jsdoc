@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.4
+
+- Hover over a JSDoc link to highlight the symbol name when Go to Definition can find its declaration.
+
 ## 0.0.3
 
 - Refresh the Marketplace icon with the `@link` branding.

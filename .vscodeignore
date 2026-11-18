@@ -1,6 +1,7 @@
 .git/**
 .serena/**
 .idea/**
+.vercel/**
 .vscode/**
 .env.1password
 images/icon.svg
