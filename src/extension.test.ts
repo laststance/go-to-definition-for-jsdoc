@@ -146,6 +146,40 @@ test('highlights the qualified symbol after an import type module path', async (
   expect(hasDefinition).toHaveBeenCalledWith(['import("./Api.Widget").Api.Widget', 'Api.Widget', 'Widget'], token)
 })
 
+test('highlights only the qualified name in a backtick-delimited import with spaces', async () => {
+  // Arrange
+  const spacedImport = createLinkDocument(' * {@link `import ( "./types" ) . Api.Widget`}')
+  hasDefinition.mockResolvedValueOnce(true)
+
+  // Act
+  const pathHover = await provider.provideHover(spacedImport, { line: 3, character: 23 } as vscode.Position, token)
+  const symbolHover = await provider.provideHover(spacedImport, { line: 3, character: 37 } as vscode.Position, token)
+
+  // Assert
+  expect(pathHover).toBeUndefined()
+  expect(symbolHover).toEqual({
+    contents: 'Go to Definition',
+    range: { startLine: 3, startCharacter: 34, endLine: 3, endCharacter: 44 },
+  })
+  expect(hasDefinition).toHaveBeenCalledTimes(1)
+  expect(hasDefinition).toHaveBeenCalledWith(['import ( "./types" ) . Api.Widget', 'Api.Widget', 'Widget'], token)
+})
+
+test('drops an obsolete hover range when an ES module changes during lookup', async () => {
+  // Arrange
+  const moduleDocument = { ...createLinkDocument(linkLine), fileName: 'usage.mts', version: 1 }
+  hasDefinition.mockImplementationOnce(async () => {
+    moduleDocument.version += 1
+    return true
+  })
+
+  // Act
+  const hover = await provider.provideHover(moduleDocument, position, token)
+
+  // Assert
+  expect(hover).toBeUndefined()
+})
+
 test.each([
   ['the module path', 20],
   ['the generic argument', 44],

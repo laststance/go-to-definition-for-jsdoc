@@ -111,9 +111,11 @@ class JsDocLinkProvider implements vscode.DefinitionProvider, vscode.HoverProvid
       return undefined
     }
 
+    const version = document.version
     const hasDefinition = await this.hasDefinition(candidates, cancellationToken)
 
-    if (cancellationToken.isCancellationRequested || !hasDefinition) {
+    // The original range is valid only in the document revision that requested it.
+    if (document.version !== version || document.isClosed || cancellationToken.isCancellationRequested || !hasDefinition) {
       return undefined
     }
 

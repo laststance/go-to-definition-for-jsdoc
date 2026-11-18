@@ -207,7 +207,7 @@ const resolveSourceScanLocations = async (
     cancellationToken,
   )
   const diskLocations = new Map<vscode.Uri, vscode.Location[]>()
-  const deferred: vscode.Uri[] = []
+  const deferred = new Set<vscode.Uri>()
   const readErrors = new Map<vscode.Uri, unknown>()
   const openDocument = (uri: vscode.Uri) => vscode.workspace.textDocuments.find(document =>
     document.uri.toString() === uri.toString(),
@@ -239,14 +239,14 @@ const resolveSourceScanLocations = async (
     const document = openDocument(uri)
     if (mode === 'first') {
       // A pending read can finish after an editor has opened or changed the file.
-      const disk = document?.isDirty ? [] : await readDisk(uri)
+      const disk = document ? [] : await readDisk(uri)
       if (cancellationToken.isCancellationRequested) return []
-      const current = openDocument(uri)
+      const current = document ?? openDocument(uri)
       if (current) readErrors.delete(uri)
       const [first] = current ? parseLocations(uri, current.getText()) : disk
       if (first) return [first]
-    } else if (document?.isDirty) {
-      deferred.push(uri)
+    } else if (document) {
+      deferred.add(uri)
     } else {
       diskLocations.set(uri, await readDisk(uri))
     }
@@ -259,12 +259,19 @@ const resolveSourceScanLocations = async (
   }
   const snapshot = () => new Map(vscode.workspace.textDocuments.map(document => [document.uri.toString(), document]))
   let open = snapshot()
-  if (deferred.some(uri => !open.has(uri.toString()))) {
-    // Cover every deferred file once: another buffer may close while recovering the first.
+  // A buffer can close during recovery, so reconsider the remaining files after each read.
+  while (deferred.size) {
+    let closed: vscode.Uri | undefined
     for (const uri of deferred) {
-      if (cancellationToken.isCancellationRequested) return []
-      diskLocations.set(uri, await readDisk(uri))
+      if (!open.has(uri.toString())) {
+        closed = uri
+        break
+      }
     }
+    if (!closed) break
+    deferred.delete(closed)
+    diskLocations.set(closed, await readDisk(closed))
+    if (cancellationToken.isCancellationRequested) return []
     open = snapshot()
   }
   if (cancellationToken.isCancellationRequested) return []

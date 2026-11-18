@@ -322,12 +322,26 @@ test.each(['before', 'after'])('hover and F12 find a target when an unreadable f
   expect(navigation.map(location => location.uri.fsPath)).toEqual(['/src/first.ts'])
 })
 
+test.each(['first', 'all'] as const)('%s resolves a clean open buffer without reading disk', async mode => {
+  // Arrange
+  api.findFiles.mockResolvedValue([first])
+  api.textDocuments.push({ uri: first, isDirty: false, getText: () => 'class Widget {}' })
+
+  // Act
+  const locations = await resolveDefinitionLocations(['Widget'], token, mode)
+
+  // Assert
+  expect(locations.map(location => location.uri.fsPath)).toEqual(['/src/first.ts'])
+  expect(api.readFile).not.toHaveBeenCalled()
+})
+
 test('F12 recovers successive closed buffers from disk and uses the latest open editor text', async () => {
   // Arrange
   const third = uri('/src/third.ts')
   const fourth = uri('/src/fourth.ts')
   const remaining = { uri: third, isDirty: true, getText: () => '' }
-  api.findFiles.mockResolvedValue([first, second, third, fourth])
+  let secondOnDisk = 'class Widget {}'
+  api.findFiles.mockResolvedValue([second, first, third, fourth])
   api.textDocuments.push(
     { uri: first, isDirty: true, getText: () => 'class Old {}' },
     { uri: second, isDirty: true, getText: () => 'class Widget {}' },
@@ -335,7 +349,12 @@ test('F12 recovers successive closed buffers from disk and uses the latest open 
   )
   api.readFile.mockImplementation(async (file: vscode.Uri) => {
     if (file === fourth) api.textDocuments.shift()
-    if (file === first) api.textDocuments.shift()
+    if (file === first) {
+      // Save the second buffer at a new location and close it during recovery.
+      secondOnDisk = '\n\nclass Widget {}'
+      api.textDocuments.shift()
+    }
+    if (file === second) return Buffer.from(secondOnDisk)
     remaining.getText = () => 'class Widget {}'
     return Buffer.from(file === first ? 'class Widget {}' : '')
   })
@@ -344,8 +363,12 @@ test('F12 recovers successive closed buffers from disk and uses the latest open 
   const locations = await resolveDefinitionLocations(['Widget'], token)
 
   // Assert
-  expect(locations.map(location => location.uri.fsPath)).toEqual(['/src/first.ts', '/src/third.ts'])
+  expect(locations.map(({ uri, range }) => [uri.fsPath, range.start])).toEqual([
+    ['/src/first.ts', { line: 0, character: 6 }],
+    ['/src/second.ts', { line: 2, character: 6 }],
+    ['/src/third.ts', { line: 0, character: 6 }],
+  ])
   expect(api.readFile.mock.calls.map(([file]) => file.fsPath)).toEqual([
-    '/src/fourth.ts', '/src/first.ts', '/src/second.ts', '/src/third.ts',
+    '/src/fourth.ts', '/src/first.ts', '/src/second.ts',
   ])
 })
