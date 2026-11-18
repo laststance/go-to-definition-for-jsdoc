@@ -15,10 +15,20 @@ const IMPORT_TYPE_PREFIX_PATTERN = /^import\(["'][^"']+["']\)\./u
  */
 export const createCandidateSymbolQueries = (linkTarget: string): string[] => {
   const normalizedLinkTarget = stripDecorativeSyntax(linkTarget)
-  const importTypeSymbolName = normalizedLinkTarget.replace(IMPORT_TYPE_PREFIX_PATTERN, '')
+  const importTypeSymbolName = stripImportTypePrefix(normalizedLinkTarget)
   const lastMemberName = getLastMemberName(importTypeSymbolName)
 
   return uniqueNonEmptyStrings([normalizedLinkTarget, importTypeSymbolName, lastMemberName])
+}
+
+/**
+ * Extracts the qualified symbol after an import-type prefix in a normalized target.
+ * {@link createCandidateSymbolQueries} uses it for fallback queries, and the hover provider uses it for the highlight.
+ * @example
+ * stripImportTypePrefix('import("./types").Api.Widget') // => "Api.Widget"
+ */
+export const stripImportTypePrefix = (normalizedLinkTarget: string): string => {
+  return normalizedLinkTarget.replace(IMPORT_TYPE_PREFIX_PATTERN, '')
 }
 
 /**

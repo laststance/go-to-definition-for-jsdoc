@@ -20,15 +20,24 @@ type ExtensionConfiguration = {
 type LookupMode = 'first' | 'all'
 const MAX_HOVER_CACHE_ENTRIES = 256
 const SYMBOL_INDEX_RETRY_MS = 5_000
+const FULL_LOOKUP_RETRY_MS = 60_000
+
+type HoverCacheEntry = {
+  found: boolean
+  indexRetryAt: number
+  fullRetryAt: number
+  requestId: number
+}
 
 /**
  * Creates the symbol-existence check used by the hover provider during activation.
- * Repeated hovers share completed results until the workspace changes.
+ * Repeated hovers share completed results until an edit or periodic revalidation.
  * @example
  * const hasDefinition = createHoverDefinitionLookup(context)
  */
 export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContext, 'subscriptions'>) => {
-  let cache = new Map<string, { found: boolean; expiresAt: number }>()
+  let cache = new Map<string, HoverCacheEntry>()
+  let latestRequestId = 0
   const invalidate = () => {
     cache = new Map()
   }
@@ -56,24 +65,37 @@ export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContex
     const key = JSON.stringify(candidateNames)
     const snapshot = cache
     const cached = snapshot.get(key)
-    if (cached && cached.expiresAt > Date.now()) {
+    const now = Date.now()
+    const needsFullLookup = !cached || now >= cached.fullRetryAt
+    if (!needsFullLookup && (cached.found || now < cached.indexRetryAt)) {
       return cached.found
     }
 
-    // The index can warm up without a file event. An unchanged workspace needs no second source scan.
-    const locations = cached
-      ? await resolveWorkspaceSymbolLocations(candidateNames, token, 'first')
-      : await resolveDefinitionLocations(candidateNames, token, 'first')
+    // Retry misses against a warming index between full checks for unobserved filesystem changes.
+    const requestId = ++latestRequestId
+    const locations = needsFullLookup
+      ? await resolveDefinitionLocations(candidateNames, token, 'first')
+      : await resolveWorkspaceSymbolLocations(candidateNames, token, 'first')
     // An edit or cancellation during the lookup makes its answer obsolete.
     if (token.isCancellationRequested || snapshot !== cache) {
       return false
     }
+    // A newer completed request for this symbol takes precedence over this delayed result.
+    const current = cache.get(key)
+    if (current && current.requestId > requestId) return current.found
+
     const found = locations.length > 0
     if (!cache.has(key) && cache.size >= MAX_HOVER_CACHE_ENTRIES) {
       const oldest = cache.keys().next()
       if (!oldest.done) cache.delete(oldest.value)
     }
-    cache.set(key, { found, expiresAt: found ? Infinity : Date.now() + SYMBOL_INDEX_RETRY_MS })
+    const completedAt = Date.now()
+    cache.set(key, {
+      found,
+      requestId,
+      indexRetryAt: completedAt + SYMBOL_INDEX_RETRY_MS,
+      fullRetryAt: needsFullLookup ? completedAt + FULL_LOOKUP_RETRY_MS : cached.fullRetryAt,
+    })
     return found
   }
 }
@@ -171,10 +193,6 @@ const resolveSourceScanLocations = async (
   )
   const locations: vscode.Location[] = []
 
-  const dirtyDocuments = new Map(
-    vscode.workspace.textDocuments.filter(document => document.isDirty).map(document => [document.uri.toString(), document]),
-  )
-
   for (const sourceFileUri of sourceFileUris) {
     if (cancellationToken.isCancellationRequested) {
       break
@@ -184,7 +202,7 @@ const resolveSourceScanLocations = async (
       continue
     }
 
-    const sourceText = dirtyDocuments.get(sourceFileUri.toString())?.getText() ?? await readWorkspaceFileAsUtf8(sourceFileUri)
+    const sourceText = await readCurrentSourceText(sourceFileUri)
     if (sourceText === undefined) continue
     const sourceDefinitions = findSymbolDefinitionsInSourceText({
       fileName: sourceFileUri.fsPath,
@@ -212,21 +230,34 @@ const resolveSourceScanLocations = async (
 }
 
 /**
- * Reads a workspace file through VS Code's filesystem API so remote workspaces still work.
+ * Reads the current source for AST fallback, preferring unsaved edits over disk contents.
  * @param fileUri - The source file URI to read.
  * @returns UTF-8 source text, or undefined if the file disappeared after enumeration.
  * @example
- * readWorkspaceFileAsUtf8(Uri.file("src/a.ts")) // => "export const a = 1"
+ * readCurrentSourceText(Uri.file("src/a.ts")) // => "export const a = 1"
  */
-const readWorkspaceFileAsUtf8 = async (fileUri: vscode.Uri): Promise<string | undefined> => {
+const readCurrentSourceText = async (fileUri: vscode.Uri): Promise<string | undefined> => {
+  const uriKey = fileUri.toString()
+  const dirtyText = () => vscode.workspace.textDocuments.find(document =>
+    document.isDirty && document.uri.toString() === uriKey,
+  )?.getText()
+  const openText = dirtyText()
+  if (openText !== undefined) return openText
+
+  let diskText: string | undefined
   try {
     const fileBytes = await vscode.workspace.fs.readFile(fileUri)
-    return Buffer.from(fileBytes).toString('utf8')
+    diskText = Buffer.from(fileBytes).toString('utf8')
   } catch (error) {
     // findFiles can list a source that disappears before readFile runs.
-    if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return undefined
-    throw error
+    if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) {
+      const editedText = dirtyText()
+      if (editedText !== undefined) return editedText
+      throw error
+    }
   }
+  // A document may have become dirty while the filesystem read was pending.
+  return dirtyText() ?? diskText
 }
 
 /**

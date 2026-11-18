@@ -164,3 +164,70 @@ test('retrying an unresolved hover checks the index without rereading unchanged 
     vi.useRealTimers()
   }
 })
+
+test('hover finds an external addition and forgets its removal even without watcher events', async () => {
+  // Arrange
+  const lookup = createHoverDefinitionLookup({ subscriptions: [] })
+  api.findFiles.mockResolvedValue([first])
+  api.readFile.mockResolvedValue(Buffer.from(''))
+  vi.useFakeTimers()
+  try {
+    // Act
+    expect(await lookup(['Widget'], token)).toBe(false)
+    api.readFile.mockResolvedValue(Buffer.from('export class Widget {}'))
+    vi.advanceTimersByTime(59_999)
+    expect(await lookup(['Widget'], token)).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(await lookup(['Widget'], token)).toBe(true)
+    api.readFile.mockResolvedValue(Buffer.from(''))
+    vi.advanceTimersByTime(59_999)
+    expect(await lookup(['Widget'], token)).toBe(true)
+    vi.advanceTimersByTime(1)
+
+    // Assert
+    expect(await lookup(['Widget'], token)).toBe(false)
+    expect(api.findFiles).toHaveBeenCalledTimes(3)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test.each([true, false])('a delayed hover respects the newer result when the newer hover found = %s', async newerFound => {
+  // Arrange
+  const lookup = createHoverDefinitionLookup({ subscriptions: [] })
+  const match = [{ name: 'Widget', location: { uri: first } }]
+  let finishOlder!: (symbols: typeof match) => void
+  api.executeCommand.mockReturnValueOnce(new Promise<typeof match>(resolve => { finishOlder = resolve }))
+    .mockResolvedValueOnce(newerFound ? match : [])
+  api.findFiles.mockResolvedValue([])
+
+  // Act
+  const older = lookup(['Widget'], token)
+  const newer = await lookup(['Widget'], token)
+  finishOlder(newerFound ? [] : match)
+
+  // Assert
+  expect(newer).toBe(newerFound)
+  expect(await older).toBe(newerFound)
+  expect(await lookup(['Widget'], token)).toBe(newerFound)
+  expect(api.executeCommand).toHaveBeenCalledTimes(2)
+})
+
+test('F12 reads edits made to both the current and the next file during a pending disk read', async () => {
+  // Arrange
+  api.readFile.mockImplementationOnce(async () => {
+    await Promise.resolve()
+    api.textDocuments.push(
+      { uri: first, isDirty: true, getText: () => 'export class Widget {}' },
+      { uri: second, isDirty: true, getText: () => 'export class Widget {}' },
+    )
+    return Buffer.from('')
+  })
+
+  // Act
+  const locations = await resolveDefinitionLocations(['Widget'], token)
+
+  // Assert
+  expect(locations.map(location => location.uri.fsPath)).toEqual(['/src/first.ts', '/src/second.ts'])
+  expect(api.readFile).toHaveBeenCalledTimes(1)
+})

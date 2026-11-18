@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 
 import { findJsDocLinkTargetAtPosition } from './jsDocLink'
 import { isSourceCommentAtOffset } from './sourceComment'
-import { createCandidateSymbolQueries } from './symbolName'
+import { createCandidateSymbolQueries, stripImportTypePrefix } from './symbolName'
 import { createHoverDefinitionLookup, resolveDefinitionLocations } from './workspaceSymbolResolver'
 
 const JSDOC_LINK_DOCUMENT_SELECTOR: vscode.DocumentSelector = [
@@ -94,14 +94,15 @@ class JsDocLinkProvider implements vscode.DefinitionProvider, vscode.HoverProvid
 
     // The first query retains the qualified name and strips JSDoc call and type suffixes.
     const candidates = createCandidateSymbolQueries(linkTarget.rawTarget)
-    const [symbolName] = candidates
-    if (!symbolName) {
+    const [fullName] = candidates
+    if (!fullName) {
       return undefined
     }
 
     const targetText = currentLineText.slice(linkTarget.targetStartCharacter, linkTarget.targetEndCharacter)
-    const startCharacter = linkTarget.targetStartCharacter + targetText.indexOf(symbolName)
-    const endCharacter = startCharacter + symbolName.length
+    // Find the whole query so matching text in the module path or suffix cannot shift the highlight.
+    const endCharacter = linkTarget.targetStartCharacter + targetText.indexOf(fullName) + fullName.length
+    const startCharacter = endCharacter - stripImportTypePrefix(fullName).length
     if (position.character < startCharacter || position.character >= endCharacter) {
       return undefined
     }

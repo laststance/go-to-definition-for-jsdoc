@@ -31,15 +31,19 @@ vi.mock('./workspaceSymbolResolver', () => ({
 }))
 
 const linkLine = " * {@link '  Api.Widget()  ' | help}"
-const source = ['/**', ' * Widget documentation.', ' *', linkLine, ' */'].join('\n')
-const linkDocument: Pick<vscode.TextDocument, 'fileName' | 'version' | 'lineAt' | 'getText' | 'offsetAt'> = {
-  fileName: 'usage.ts',
-  version: 1,
-  lineAt: () => ({ text: linkLine }) as vscode.TextLine,
-  getText: () => source,
-  offsetAt: (at) => source.indexOf(linkLine) + at.character,
+const createLinkDocument = (targetLine: string): vscode.TextDocument => {
+  const source = ['/**', ' * Widget documentation.', ' *', targetLine, ' */'].join('\n')
+  const linkDocument: Pick<vscode.TextDocument, 'fileName' | 'version' | 'lineAt' | 'getText' | 'offsetAt'> = {
+    fileName: 'usage.ts',
+    version: 1,
+    lineAt: () => ({ text: targetLine }) as vscode.TextLine,
+    getText: () => source,
+    offsetAt: (at) => source.indexOf(targetLine) + at.character,
+  }
+  return linkDocument as vscode.TextDocument
 }
-const document = linkDocument as vscode.TextDocument
+const document = createLinkDocument(linkLine)
+const importDocument = createLinkDocument(' * {@link import("./Api.Widget").Api.Widget<Api.Widget>(Api.Widget)}')
 const position = { line: 3, character: 15 } as vscode.Position
 let provider: vscode.HoverProvider
 const token = { isCancellationRequested: false, onCancellationRequested: vi.fn() }
@@ -125,4 +129,56 @@ test('navigates to the definition from a decorative call parenthesis', async () 
   // Assert
   expect(definition).toEqual(locations)
   expect(resolveDefinitionLocations).toHaveBeenCalledWith(['Api.Widget', 'Widget'], token)
+})
+
+test('highlights the qualified symbol after an import type module path', async () => {
+  // Arrange
+  hasDefinition.mockResolvedValueOnce(true)
+
+  // Act
+  const hover = await provider.provideHover(importDocument, { line: 3, character: 33 } as vscode.Position, token)
+
+  // Assert
+  expect(hover).toEqual({
+    contents: 'Go to Definition',
+    range: { startLine: 3, startCharacter: 33, endLine: 3, endCharacter: 43 },
+  })
+  expect(hasDefinition).toHaveBeenCalledWith(['import("./Api.Widget").Api.Widget', 'Api.Widget', 'Widget'], token)
+})
+
+test.each([
+  ['the module path', 20],
+  ['the generic argument', 44],
+  ['the call argument', 56],
+])('leaves %s of an import type link unhighlighted without looking up a definition', async (_, character) => {
+  // Arrange
+  const outside = { line: 3, character } as vscode.Position
+
+  // Act
+  const hover = await provider.provideHover(importDocument, outside, token)
+
+  // Assert
+  expect(hover).toBeUndefined()
+  expect(hasDefinition).not.toHaveBeenCalled()
+})
+
+test('navigates to the linked symbol when Go to Definition is triggered on the module path', async () => {
+  // Arrange
+  const definitionProvider = registerDefinitionProvider.mock.calls[0][1]
+  const locations = [{} as vscode.Location]
+  vi.mocked(resolveDefinitionLocations).mockResolvedValueOnce(locations)
+
+  // Act
+  const definition = await definitionProvider.provideDefinition(
+    importDocument,
+    { line: 3, character: 20 } as vscode.Position,
+    token,
+  )
+
+  // Assert
+  expect(definition).toEqual(locations)
+  expect(resolveDefinitionLocations).toHaveBeenCalledWith(
+    ['import("./Api.Widget").Api.Widget', 'Api.Widget', 'Widget'],
+    token,
+  )
 })
