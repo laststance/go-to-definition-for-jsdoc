@@ -56,6 +56,7 @@ export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContex
     watcher.onDidCreate(invalidateSource),
     watcher.onDidChange(invalidateSource),
     watcher.onDidDelete(invalidateSource),
+    vscode.workspace.onDidOpenTextDocument(document => invalidateSource(document.uri)),
     vscode.workspace.onDidChangeTextDocument(({ document }) => invalidateSource(document.uri)),
     vscode.workspace.onDidCloseTextDocument(document => invalidateSource(document.uri)),
     vscode.workspace.onDidChangeWorkspaceFolders(invalidate),
@@ -220,72 +221,92 @@ const resolveSourceScanLocations = async (
     definition.startLine, definition.startCharacter, definition.endLine, definition.endCharacter,
   )))
 
+  const saved = new Map<string, { text: string }>()
   const readDisk = async (uri: vscode.Uri) => {
+    const key = uri.toString()
+    const beforeRead = saved.get(key)
     let bytes: Uint8Array
     try {
       bytes = await vscode.workspace.fs.readFile(uri)
     } catch (error) {
       // Keep scanning other files, but surface the first failure if none can resolve the symbol.
-      if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) readErrors.set(uri, error)
+      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+        if (saved.get(key) === beforeRead) saved.delete(key)
+      } else {
+        readErrors.set(uri, error)
+      }
       return []
     }
+    // A successful read supersedes an earlier save unless another save raced the read.
+    if (saved.get(key) !== beforeRead) return []
+    saved.delete(key)
     return cancellationToken.isCancellationRequested ? [] : parseLocations(uri, Buffer.from(bytes).toString('utf8'))
   }
 
-  for (const uri of sourceFileUris) {
-    if (cancellationToken.isCancellationRequested) return []
-    if (!isSupportedSourceFileUri(uri)) continue
-
-    const document = openDocument(uri)
-    if (mode === 'first') {
-      // A pending read can finish after an editor has opened or changed the file.
-      const disk = document ? [] : await readDisk(uri)
+  const eligible = mode === 'all' ? new Set(sourceFileUris.filter(isSupportedSourceFileUri).map(uri => uri.toString())) : undefined
+  const saveListener = eligible && vscode.workspace.onDidSaveTextDocument(document => {
+    const key = document.uri.toString()
+    if (eligible.has(key)) saved.set(key, { text: document.getText() })
+  })
+  try {
+    for (const uri of sourceFileUris) {
       if (cancellationToken.isCancellationRequested) return []
-      const current = document ?? openDocument(uri)
-      if (current) readErrors.delete(uri)
-      const [first] = current ? parseLocations(uri, current.getText()) : disk
-      if (first) return [first]
-    } else if (document) {
-      deferred.add(uri)
-    } else {
-      diskLocations.set(uri, await readDisk(uri))
-    }
-  }
+      if (!isSupportedSourceFileUri(uri)) continue
 
-  if (cancellationToken.isCancellationRequested) return []
-  if (mode === 'first') {
-    if (readErrors.size) throw readErrors.values().next().value
-    return []
-  }
-  const snapshot = () => new Map(vscode.workspace.textDocuments.map(document => [document.uri.toString(), document]))
-  let open = snapshot()
-  // A buffer can close during recovery, so reconsider the remaining files after each read.
-  while (deferred.size) {
-    let closed: vscode.Uri | undefined
-    for (const uri of deferred) {
-      if (!open.has(uri.toString())) {
-        closed = uri
-        break
+      const document = openDocument(uri)
+      if (mode === 'first') {
+        // A pending read can finish after an editor has opened or changed the file.
+        const disk = document ? [] : await readDisk(uri)
+        if (cancellationToken.isCancellationRequested) return []
+        const current = document ?? openDocument(uri)
+        if (current) readErrors.delete(uri)
+        const [first] = current ? parseLocations(uri, current.getText()) : disk
+        if (first) return [first]
+      } else if (document) {
+        deferred.add(uri)
+      } else {
+        diskLocations.set(uri, await readDisk(uri))
       }
     }
-    if (!closed) break
-    deferred.delete(closed)
-    diskLocations.set(closed, await readDisk(closed))
-    if (cancellationToken.isCancellationRequested) return []
-    open = snapshot()
-  }
-  if (cancellationToken.isCancellationRequested) return []
 
-  // Read final buffers synchronously so later reads cannot invalidate earlier locations.
-  const locations: vscode.Location[] = []
-  for (const uri of sourceFileUris) {
-    if (!isSupportedSourceFileUri(uri)) continue
-    const document = open.get(uri.toString())
-    if (document) readErrors.delete(uri)
-    locations.push(...(document ? parseLocations(uri, document.getText()) : diskLocations.get(uri) ?? []))
+    if (cancellationToken.isCancellationRequested) return []
+    if (mode === 'first') {
+      if (readErrors.size) throw readErrors.values().next().value
+      return []
+    }
+    const snapshot = () => new Map(vscode.workspace.textDocuments.map(document => [document.uri.toString(), document]))
+    let open = snapshot()
+    // A buffer can close during recovery, so reconsider the remaining files after each read.
+    while (deferred.size) {
+      let closed: vscode.Uri | undefined
+      for (const uri of deferred) {
+        if (!open.has(uri.toString())) {
+          closed = uri
+          break
+        }
+      }
+      if (!closed) break
+      deferred.delete(closed)
+      diskLocations.set(closed, await readDisk(closed))
+      if (cancellationToken.isCancellationRequested) return []
+      open = snapshot()
+    }
+    if (cancellationToken.isCancellationRequested) return []
+
+    // Prefer the current buffer, then the latest editor save, then the completed disk read.
+    const locations: vscode.Location[] = []
+    for (const uri of sourceFileUris) {
+      if (!isSupportedSourceFileUri(uri)) continue
+      const document = open.get(uri.toString())
+      const sourceText = document?.getText() ?? saved.get(uri.toString())?.text
+      if (sourceText !== undefined) readErrors.delete(uri)
+      locations.push(...(sourceText !== undefined ? parseLocations(uri, sourceText) : diskLocations.get(uri) ?? []))
+    }
+    if (!locations.length && readErrors.size) throw readErrors.values().next().value
+    return takeFirstDefinitions(deduplicateLocations(locations))
+  } finally {
+    saveListener?.dispose()
   }
-  if (!locations.length && readErrors.size) throw readErrors.values().next().value
-  return takeFirstDefinitions(deduplicateLocations(locations))
 }
 
 /**

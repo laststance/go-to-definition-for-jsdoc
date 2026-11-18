@@ -177,6 +177,7 @@ test('drops an obsolete hover range when an ES module changes during lookup', as
   const hover = await provider.provideHover(moduleDocument, position, token)
 
   // Assert
+  expect(hasDefinition).toHaveBeenCalledWith(['Api.Widget', 'Widget'], token)
   expect(hover).toBeUndefined()
 })
 

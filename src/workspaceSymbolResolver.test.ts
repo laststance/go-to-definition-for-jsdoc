@@ -7,7 +7,9 @@ const api = vi.hoisted(() => ({
   executeCommand: vi.fn(),
   findFiles: vi.fn(),
   readFile: vi.fn(),
+  openDocument: vi.fn(),
   changeDocument: vi.fn(),
+  saveDocument: vi.fn(),
   textDocuments: [] as Pick<vscode.TextDocument, 'uri' | 'getText' | 'isDirty'>[],
   FileSystemError: class extends Error {
     constructor(readonly code: string) { super(code) }
@@ -18,8 +20,10 @@ vi.mock('vscode', () => ({
   commands: { executeCommand: api.executeCommand },
   workspace: {
     createFileSystemWatcher: () => ({ onDidCreate: vi.fn(), onDidChange: vi.fn(), onDidDelete: vi.fn() }),
+    onDidOpenTextDocument: api.openDocument,
     onDidChangeTextDocument: api.changeDocument,
     onDidCloseTextDocument: vi.fn(),
+    onDidSaveTextDocument: api.saveDocument,
     onDidChangeWorkspaceFolders: vi.fn(),
     onDidChangeConfiguration: vi.fn(),
     getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
@@ -82,6 +86,26 @@ test('a missing hover target becomes available as soon as its declaration is typ
   expect(await lookup(['Widget'], token)).toBe(true)
   expect(api.findFiles).toHaveBeenCalledTimes(2)
   expect(api.readFile).toHaveBeenCalledTimes(2)
+})
+
+test('opening a source refreshes hover results while opening documentation preserves them', async () => {
+  // Arrange
+  const lookup = createHoverDefinitionLookup({ subscriptions: [] })
+  api.readFile.mockResolvedValue(Buffer.from(''))
+  const onOpen = api.openDocument.mock.calls[0][0]
+
+  // Act
+  const noDefinition = await lookup(['Widget'], token)
+  onOpen({ uri: uri('/src/README.md') })
+  const afterReadme = await lookup(['Widget'], token)
+  const document = { uri: first, isDirty: false, getText: () => 'export class Widget {}' }
+  api.textDocuments.push(document)
+  onOpen(document)
+  const afterSource = await lookup(['Widget'], token)
+
+  // Assert
+  expect([noDefinition, afterReadme, afterSource]).toEqual([false, false, true])
+  expect(api.findFiles).toHaveBeenCalledTimes(2)
 })
 
 test('Go to Definition skips a deleted file and collects every remaining matching file', async () => {
@@ -371,4 +395,36 @@ test('F12 recovers successive closed buffers from disk and uses the latest open 
   expect(api.readFile.mock.calls.map(([file]) => file.fsPath)).toEqual([
     '/src/fourth.ts', '/src/first.ts', '/src/second.ts',
   ])
+})
+
+test('F12 navigates to the latest save when a recovered file reopens and closes during another read', async () => {
+  // Arrange
+  const third = uri('/src/third.ts')
+  const dispose = vi.fn()
+  api.saveDocument.mockReturnValue({ dispose })
+  api.findFiles.mockResolvedValue([first, second, third])
+  api.textDocuments.push(
+    { uri: first, isDirty: false, getText: () => 'class Widget {}' },
+    { uri: second, isDirty: false, getText: () => '' },
+  )
+  api.readFile.mockImplementation(async (file: vscode.Uri) => {
+    if (file === third) api.textDocuments.length = 0
+    if (file === first) return Buffer.from('class Widget {}')
+    if (file === second) {
+      const reopened = { uri: first, isDirty: false, getText: () => '\n\nclass Widget {}' }
+      api.textDocuments.push(reopened)
+      api.saveDocument.mock.calls[0][0](reopened)
+      api.textDocuments.pop()
+    }
+    return Buffer.from('')
+  })
+
+  // Act
+  const locations = await resolveDefinitionLocations(['Widget'], token)
+
+  // Assert
+  expect(locations.map(({ uri, range }) => [uri.fsPath, range.start])).toEqual([
+    ['/src/first.ts', { line: 2, character: 6 }],
+  ])
+  expect(dispose).toHaveBeenCalledOnce()
 })
