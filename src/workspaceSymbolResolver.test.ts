@@ -30,8 +30,13 @@ vi.mock('vscode', () => ({
   FileSystemError: api.FileSystemError,
   Location: class { constructor(readonly uri: vscode.Uri, readonly range: vscode.Range) {} },
   Range: class {
-    readonly start = { line: 0, character: 0 }
-    readonly end = { line: 0, character: 1 }
+    readonly start
+    readonly end
+
+    constructor(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
+      this.start = { line: startLine, character: startCharacter }
+      this.end = { line: endLine, character: endCharacter }
+    }
   },
 }))
 
@@ -213,13 +218,38 @@ test.each([true, false])('a delayed hover respects the newer result when the new
   expect(api.executeCommand).toHaveBeenCalledTimes(2)
 })
 
+test('an evicted hover result cannot be replaced by an older pending match', async () => {
+  // Arrange
+  const lookup = createHoverDefinitionLookup({ subscriptions: [] })
+  const match = [{ name: 'Widget', location: { uri: first } }]
+  let finishOlder!: (symbols: typeof match) => void
+  api.executeCommand.mockReturnValueOnce(new Promise<typeof match>(resolve => { finishOlder = resolve }))
+  api.findFiles.mockResolvedValue([])
+
+  // Act
+  const older = lookup(['Widget'], token)
+  const newer = await lookup(['Widget'], token)
+  // Fill the bounded cache to evict its first entry, the newer Widget result.
+  for (let index = 0; index < 256; index++) {
+    await lookup([`Other${index}`], token)
+  }
+  finishOlder(match)
+  const delayed = await older
+  const next = await lookup(['Widget'], token)
+
+  // Assert
+  expect([newer, delayed, next]).toEqual([false, false, false])
+  expect(api.executeCommand).toHaveBeenLastCalledWith('vscode.executeWorkspaceSymbolProvider', 'Widget')
+  expect(api.executeCommand).toHaveBeenCalledTimes(259)
+})
+
 test('F12 reads edits made to both the current and the next file during a pending disk read', async () => {
   // Arrange
   api.readFile.mockImplementationOnce(async () => {
     await Promise.resolve()
     api.textDocuments.push(
-      { uri: first, isDirty: true, getText: () => 'export class Widget {}' },
-      { uri: second, isDirty: true, getText: () => 'export class Widget {}' },
+      { uri: first, isDirty: true, getText: () => '\nexport class Widget {}' },
+      { uri: second, isDirty: true, getText: () => '\n\n  class Widget {}' },
     )
     return Buffer.from('')
   })
@@ -228,6 +258,26 @@ test('F12 reads edits made to both the current and the next file during a pendin
   const locations = await resolveDefinitionLocations(['Widget'], token)
 
   // Assert
-  expect(locations.map(location => location.uri.fsPath)).toEqual(['/src/first.ts', '/src/second.ts'])
+  expect(locations.map(({ uri, range }) => [uri.fsPath, range.start, range.end])).toEqual([
+    ['/src/first.ts', { line: 1, character: 13 }, { line: 1, character: 19 }],
+    ['/src/second.ts', { line: 2, character: 8 }, { line: 2, character: 14 }],
+  ])
   expect(api.readFile).toHaveBeenCalledTimes(1)
+})
+
+test('F12 drops an unsaved declaration reverted while reading another file', async () => {
+  // Arrange
+  const document = { uri: first, isDirty: true, getText: () => 'export class Widget {}' }
+  api.textDocuments.push(document)
+  api.readFile.mockImplementationOnce(async () => {
+    document.isDirty = false
+    document.getText = () => 'export class Other {}'
+    return Buffer.from('export class Widget {}')
+  })
+
+  // Act
+  const locations = await resolveDefinitionLocations(['Widget'], token)
+
+  // Assert
+  expect(locations.map(location => location.uri.fsPath)).toEqual(['/src/second.ts'])
 })

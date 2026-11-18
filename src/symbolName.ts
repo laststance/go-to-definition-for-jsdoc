@@ -4,7 +4,7 @@ const TRAILING_CALL_PATTERN = /\([^)]*\)$/u
 
 const TYPE_PARAMETER_SUFFIX_PATTERN = /<[^<>]*>$/u
 
-const IMPORT_TYPE_PREFIX_PATTERN = /^import\(["'][^"']+["']\)\./u
+const IMPORT_TYPE_PREFIX_PATTERN = /^import\((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\)\./u
 
 /**
  * Creates workspace symbol query candidates from a JSDoc link target.
