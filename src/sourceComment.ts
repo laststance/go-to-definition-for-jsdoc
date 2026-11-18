@@ -1,13 +1,29 @@
 import * as ts from 'typescript'
+import type { TextDocument } from 'vscode'
+
+type SourceDocument = Pick<TextDocument, 'fileName' | 'version' | 'getText'>
+
+const parsedDocuments = new WeakMap<SourceDocument, { version: number; sourceFile: ts.SourceFile }>()
 
 /**
  * Checks whether a potential hover target belongs to a JavaScript or TypeScript comment.
  * The hover provider calls this after matching a link so other positions skip parsing.
  * @example
- * isSourceCommentAtOffset('notes.ts', '// See {@link Thing}', 14) // => true
+ * isSourceCommentAtOffset(document, document.offsetAt(position))
  */
-export function isSourceCommentAtOffset(fileName: string, sourceText: string, offset: number): boolean {
-  const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest)
+export function isSourceCommentAtOffset(document: SourceDocument, offset: number): boolean {
+  let parsed = parsedDocuments.get(document)
+
+  // Reparse after edits. The weak key lets closed documents be collected.
+  if (parsed?.version !== document.version) {
+    parsed = {
+      version: document.version,
+      sourceFile: ts.createSourceFile(document.fileName, document.getText(), ts.ScriptTarget.Latest),
+    }
+    parsedDocuments.set(document, parsed)
+  }
+
+  const { sourceFile } = parsed
   let node: ts.Node = sourceFile
 
   // Descend to the token that owns this offset, including its leading trivia.
@@ -32,6 +48,9 @@ export function isSourceCommentAtOffset(fileName: string, sourceText: string, of
 
   // A token owns the trailing comments of the previous token as well as its own leading comments.
   const fullStart = node.getFullStart()
-  return [ts.getLeadingCommentRanges(sourceText, fullStart), ts.getTrailingCommentRanges(sourceText, fullStart)]
+  return [
+    ts.getLeadingCommentRanges(sourceFile.text, fullStart),
+    ts.getTrailingCommentRanges(sourceFile.text, fullStart),
+  ]
     .some((ranges) => ranges?.some((range) => range.pos <= offset && offset < range.end))
 }

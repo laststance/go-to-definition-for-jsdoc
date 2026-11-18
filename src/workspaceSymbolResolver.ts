@@ -17,10 +17,72 @@ type ExtensionConfiguration = {
   readonly maxSourceScanFiles: number
 }
 
+type LookupMode = 'first' | 'all'
+const MAX_HOVER_CACHE_ENTRIES = 256
+const SYMBOL_INDEX_RETRY_MS = 5_000
+
+/**
+ * Creates the symbol-existence check used by the hover provider during activation.
+ * Repeated hovers share completed results until the workspace changes.
+ * @example
+ * const hasDefinition = createHoverDefinitionLookup(context)
+ */
+export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContext, 'subscriptions'>) => {
+  let cache = new Map<string, { found: boolean; expiresAt: number }>()
+  const invalidate = () => {
+    cache = new Map()
+  }
+  const invalidateSource = (uri: vscode.Uri) => {
+    if (isSupportedSourceFileUri(uri)) {
+      invalidate()
+    }
+  }
+  const watcher = vscode.workspace.createFileSystemWatcher(SOURCE_FILE_GLOB)
+  context.subscriptions.push(
+    watcher,
+    watcher.onDidCreate(invalidateSource),
+    watcher.onDidChange(invalidateSource),
+    watcher.onDidDelete(invalidateSource),
+    vscode.workspace.onDidChangeTextDocument(({ document }) => invalidateSource(document.uri)),
+    vscode.workspace.onDidCloseTextDocument(document => invalidateSource(document.uri)),
+    vscode.workspace.onDidChangeWorkspaceFolders(invalidate),
+    vscode.workspace.onDidChangeConfiguration(invalidate),
+  )
+
+  return async (candidateNames: readonly string[], token: vscode.CancellationToken): Promise<boolean> => {
+    if (token.isCancellationRequested || !candidateNames.length) {
+      return false
+    }
+    const key = JSON.stringify(candidateNames)
+    const snapshot = cache
+    const cached = snapshot.get(key)
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.found
+    }
+
+    // The index can warm up without a file event. An unchanged workspace needs no second source scan.
+    const locations = cached
+      ? await resolveWorkspaceSymbolLocations(candidateNames, token, 'first')
+      : await resolveDefinitionLocations(candidateNames, token, 'first')
+    // An edit or cancellation during the lookup makes its answer obsolete.
+    if (token.isCancellationRequested || snapshot !== cache) {
+      return false
+    }
+    const found = locations.length > 0
+    if (!cache.has(key) && cache.size >= MAX_HOVER_CACHE_ENTRIES) {
+      const oldest = cache.keys().next()
+      if (!oldest.done) cache.delete(oldest.value)
+    }
+    cache.set(key, { found, expiresAt: found ? Infinity : Date.now() + SYMBOL_INDEX_RETRY_MS })
+    return found
+  }
+}
+
 /**
  * Resolves candidate symbol names to definition locations across the active VS Code workspace.
  * @param candidateSymbolNames - Exact symbol names derived from a JSDoc link target.
  * @param cancellationToken - VS Code cancellation token for editor navigation requests.
+ * @param mode - Hover stops at the first match. Navigation collects all matching locations up to the result limit.
  * @returns Matching definition locations, ordered by VS Code workspace symbols first and AST fallback second.
  * @example
  * resolveDefinitionLocations(["useThing"], token) // => [Location(...)]
@@ -28,8 +90,9 @@ type ExtensionConfiguration = {
 export const resolveDefinitionLocations = async (
   candidateSymbolNames: readonly string[],
   cancellationToken: vscode.CancellationToken,
+  mode: LookupMode = 'all',
 ): Promise<vscode.Location[]> => {
-  const workspaceSymbolLocations = await resolveWorkspaceSymbolLocations(candidateSymbolNames, cancellationToken)
+  const workspaceSymbolLocations = await resolveWorkspaceSymbolLocations(candidateSymbolNames, cancellationToken, mode)
 
   if (workspaceSymbolLocations.length > 0 || cancellationToken.isCancellationRequested) {
     return workspaceSymbolLocations
@@ -41,7 +104,7 @@ export const resolveDefinitionLocations = async (
     return []
   }
 
-  return resolveSourceScanLocations(candidateSymbolNames, extensionConfiguration.maxSourceScanFiles, cancellationToken)
+  return resolveSourceScanLocations(candidateSymbolNames, extensionConfiguration.maxSourceScanFiles, cancellationToken, mode)
 }
 
 /**
@@ -55,6 +118,7 @@ export const resolveDefinitionLocations = async (
 const resolveWorkspaceSymbolLocations = async (
   candidateSymbolNames: readonly string[],
   cancellationToken: vscode.CancellationToken,
+  mode: LookupMode,
 ): Promise<vscode.Location[]> => {
   const candidateNameSet = new Set(candidateSymbolNames)
   const locations: vscode.Location[] = []
@@ -75,6 +139,8 @@ const resolveWorkspaceSymbolLocations = async (
         continue
       }
 
+      // A hover only needs evidence of one matching definition.
+      if (mode === 'first') return [workspaceSymbol.location]
       locations.push(workspaceSymbol.location)
     }
   }
@@ -95,6 +161,7 @@ const resolveSourceScanLocations = async (
   candidateSymbolNames: readonly string[],
   maxSourceScanFiles: number,
   cancellationToken: vscode.CancellationToken,
+  mode: LookupMode,
 ): Promise<vscode.Location[]> => {
   const sourceFileUris = await vscode.workspace.findFiles(
     SOURCE_FILE_GLOB,
@@ -103,6 +170,10 @@ const resolveSourceScanLocations = async (
     cancellationToken,
   )
   const locations: vscode.Location[] = []
+
+  const dirtyDocuments = new Map(
+    vscode.workspace.textDocuments.filter(document => document.isDirty).map(document => [document.uri.toString(), document]),
+  )
 
   for (const sourceFileUri of sourceFileUris) {
     if (cancellationToken.isCancellationRequested) {
@@ -113,7 +184,8 @@ const resolveSourceScanLocations = async (
       continue
     }
 
-    const sourceText = await readWorkspaceFileAsUtf8(sourceFileUri)
+    const sourceText = dirtyDocuments.get(sourceFileUri.toString())?.getText() ?? await readWorkspaceFileAsUtf8(sourceFileUri)
+    if (sourceText === undefined) continue
     const sourceDefinitions = findSymbolDefinitionsInSourceText({
       fileName: sourceFileUri.fsPath,
       sourceText,
@@ -132,6 +204,7 @@ const resolveSourceScanLocations = async (
           ),
         ),
       )
+      if (mode === 'first') return locations
     }
   }
 
@@ -141,14 +214,19 @@ const resolveSourceScanLocations = async (
 /**
  * Reads a workspace file through VS Code's filesystem API so remote workspaces still work.
  * @param fileUri - The source file URI to read.
- * @returns UTF-8 source text.
+ * @returns UTF-8 source text, or undefined if the file disappeared after enumeration.
  * @example
  * readWorkspaceFileAsUtf8(Uri.file("src/a.ts")) // => "export const a = 1"
  */
-const readWorkspaceFileAsUtf8 = async (fileUri: vscode.Uri): Promise<string> => {
-  const fileBytes = await vscode.workspace.fs.readFile(fileUri)
-
-  return Buffer.from(fileBytes).toString('utf8')
+const readWorkspaceFileAsUtf8 = async (fileUri: vscode.Uri): Promise<string | undefined> => {
+  try {
+    const fileBytes = await vscode.workspace.fs.readFile(fileUri)
+    return Buffer.from(fileBytes).toString('utf8')
+  } catch (error) {
+    // findFiles can list a source that disappears before readFile runs.
+    if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return undefined
+    throw error
+  }
 }
 
 /**

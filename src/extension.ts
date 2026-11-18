@@ -3,7 +3,7 @@ import * as vscode from 'vscode'
 import { findJsDocLinkTargetAtPosition } from './jsDocLink'
 import { isSourceCommentAtOffset } from './sourceComment'
 import { createCandidateSymbolQueries } from './symbolName'
-import { resolveDefinitionLocations } from './workspaceSymbolResolver'
+import { createHoverDefinitionLookup, resolveDefinitionLocations } from './workspaceSymbolResolver'
 
 const JSDOC_LINK_DOCUMENT_SELECTOR: vscode.DocumentSelector = [
   { scheme: 'file', language: 'typescript' },
@@ -19,7 +19,7 @@ const JSDOC_LINK_DOCUMENT_SELECTOR: vscode.DocumentSelector = [
  * activate(context)
  */
 export const activate = (context: vscode.ExtensionContext): void => {
-  const provider = new JsDocLinkProvider()
+  const provider = new JsDocLinkProvider(createHoverDefinitionLookup(context))
 
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(JSDOC_LINK_DOCUMENT_SELECTOR, provider),
@@ -38,9 +38,11 @@ export const deactivate = (): void => undefined
 /**
  * Gives VS Code a shared symbol lookup for navigating and highlighting JSDoc links.
  * @example
- * new JsDocLinkProvider().provideDefinition(document, position, token)
+ * new JsDocLinkProvider(createHoverDefinitionLookup(context)).provideDefinition(document, position, token)
  */
 class JsDocLinkProvider implements vscode.DefinitionProvider, vscode.HoverProvider {
+  constructor(private readonly hasDefinition: ReturnType<typeof createHoverDefinitionLookup>) {}
+
   /**
    * Resolves the link target under the cursor to workspace symbol definition locations.
    * @param document - The active text document where Go to Definition was triggered.
@@ -60,11 +62,16 @@ class JsDocLinkProvider implements vscode.DefinitionProvider, vscode.HoverProvid
     const currentLineText = document.lineAt(position.line).text
     const linkTarget = findJsDocLinkTargetAtPosition(currentLineText, position.character)
 
-    if (!linkTarget) {
+    if (!linkTarget || cancellationToken.isCancellationRequested) {
       return undefined
     }
 
-    return this.resolveTarget(linkTarget.rawTarget, cancellationToken)
+    const candidates = createCandidateSymbolQueries(linkTarget.rawTarget)
+    if (candidates.length === 0) {
+      return undefined
+    }
+
+    return resolveDefinitionLocations(candidates, cancellationToken)
   }
 
   /**
@@ -85,47 +92,31 @@ class JsDocLinkProvider implements vscode.DefinitionProvider, vscode.HoverProvid
       return undefined
     }
 
-    // Quoted targets can contain padding. Only the symbol text is hoverable.
+    // The first query retains the qualified name and strips JSDoc call and type suffixes.
+    const candidates = createCandidateSymbolQueries(linkTarget.rawTarget)
+    const [symbolName] = candidates
+    if (!symbolName) {
+      return undefined
+    }
+
     const targetText = currentLineText.slice(linkTarget.targetStartCharacter, linkTarget.targetEndCharacter)
-    const startCharacter = linkTarget.targetStartCharacter + targetText.indexOf(linkTarget.rawTarget)
-    const endCharacter = startCharacter + linkTarget.rawTarget.length
+    const startCharacter = linkTarget.targetStartCharacter + targetText.indexOf(symbolName)
+    const endCharacter = startCharacter + symbolName.length
     if (position.character < startCharacter || position.character >= endCharacter) {
       return undefined
     }
 
-    if (!isSourceCommentAtOffset(document.fileName, document.getText(), document.offsetAt(position))) {
+    if (!isSourceCommentAtOffset(document, document.offsetAt(position))) {
       return undefined
     }
 
-    const locations = await this.resolveTarget(linkTarget.rawTarget, cancellationToken)
+    const hasDefinition = await this.hasDefinition(candidates, cancellationToken)
 
-    if (cancellationToken.isCancellationRequested || !locations?.length) {
+    if (cancellationToken.isCancellationRequested || !hasDefinition) {
       return undefined
     }
 
     const targetRange = new vscode.Range(position.line, startCharacter, position.line, endCharacter)
     return new vscode.Hover('Go to Definition', targetRange)
-  }
-
-  /**
-   * Shares workspace symbol lookup between {@link provideDefinition} and {@link provideHover}.
-   * @example
-   * this.resolveTarget('useThing', token)
-   */
-  private resolveTarget(
-    rawTarget: string,
-    cancellationToken: vscode.CancellationToken,
-  ): Promise<vscode.Location[]> | undefined {
-    if (cancellationToken.isCancellationRequested) {
-      return undefined
-    }
-
-    const candidateSymbolQueries = createCandidateSymbolQueries(rawTarget)
-
-    if (candidateSymbolQueries.length === 0) {
-      return undefined
-    }
-
-    return resolveDefinitionLocations(candidateSymbolQueries, cancellationToken)
   }
 }
