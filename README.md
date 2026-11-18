@@ -30,7 +30,7 @@ It focuses on the everyday symbol-navigation case rather than replacing native r
  */
 ```
 
-Place the cursor inside the link target and run VS Code's Go to Definition command.
+Hover over the symbol name to highlight it when the extension finds a definition. To jump there, place the cursor inside the name and run **Go to Definition** (F12).
 
 ## Supported Links
 

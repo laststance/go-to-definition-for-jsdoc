@@ -17,10 +17,110 @@ type ExtensionConfiguration = {
   readonly maxSourceScanFiles: number
 }
 
+type LookupMode = 'first' | 'all'
+const MAX_HOVER_CACHE_ENTRIES = 256
+const SYMBOL_INDEX_RETRY_MS = 5_000
+const FULL_LOOKUP_RETRY_MS = 60_000
+
+type HoverCacheEntry = {
+  found: boolean
+  indexRetryAt: number
+  fullRetryAt: number
+}
+
+/**
+ * Creates the symbol-existence check used by the hover provider during activation.
+ * Repeated hovers share completed results until an edit or periodic revalidation.
+ * @example
+ * const hasDefinition = createHoverDefinitionLookup(context)
+ */
+export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContext, 'subscriptions'>) => {
+  const cache = new Map<string, HoverCacheEntry>()
+  const pending = new Map<string, {
+    active: number
+    nextOrder: number
+    completed?: { order: number; found: boolean }
+  }>()
+  const invalidate = () => {
+    cache.clear()
+    pending.clear()
+  }
+  const invalidateSource = (uri: vscode.Uri) => {
+    if (isSupportedSourceFileUri(uri)) {
+      invalidate()
+    }
+  }
+  const watcher = vscode.workspace.createFileSystemWatcher(SOURCE_FILE_GLOB)
+  context.subscriptions.push(
+    watcher,
+    watcher.onDidCreate(invalidateSource),
+    watcher.onDidChange(invalidateSource),
+    watcher.onDidDelete(invalidateSource),
+    vscode.workspace.onDidOpenTextDocument(document => invalidateSource(document.uri)),
+    vscode.workspace.onDidChangeTextDocument(({ document }) => invalidateSource(document.uri)),
+    vscode.workspace.onDidCloseTextDocument(document => invalidateSource(document.uri)),
+    vscode.workspace.onDidChangeWorkspaceFolders(invalidate),
+    vscode.workspace.onDidChangeConfiguration(invalidate),
+  )
+
+  return async (candidateNames: readonly string[], token: vscode.CancellationToken): Promise<boolean> => {
+    if (token.isCancellationRequested || !candidateNames.length) {
+      return false
+    }
+    const key = JSON.stringify(candidateNames)
+    const cached = cache.get(key)
+    const now = Date.now()
+    const needsFullLookup = !cached || now >= cached.fullRetryAt
+    if (!needsFullLookup && (cached.found || now < cached.indexRetryAt)) {
+      return cached.found
+    }
+
+    // Retain the newest completed answer while overlapping requests can still publish.
+    const group = pending.get(key) ?? { active: 0, nextOrder: 0 }
+    pending.set(key, group)
+    group.active++
+    const order = group.nextOrder++
+    try {
+      // Retry misses against a warming index between full checks for unobserved filesystem changes.
+      const locations = needsFullLookup
+        ? await resolveDefinitionLocations(candidateNames, token, 'first')
+        : await resolveWorkspaceSymbolLocations(candidateNames, token, 'first')
+      // An edit or cancellation during the lookup makes its answer obsolete.
+      if (token.isCancellationRequested || pending.get(key) !== group) {
+        return false
+      }
+      if (group.completed && group.completed.order > order) {
+        return group.completed.found
+      }
+
+      const found = locations.length > 0
+      group.completed = { order, found }
+      if (!cache.has(key) && cache.size >= MAX_HOVER_CACHE_ENTRIES) {
+        const oldest = cache.keys().next()
+        if (!oldest.done) cache.delete(oldest.value)
+      }
+      const completedAt = Date.now()
+      cache.set(key, {
+        found,
+        indexRetryAt: completedAt + SYMBOL_INDEX_RETRY_MS,
+        fullRetryAt: needsFullLookup ? completedAt + FULL_LOOKUP_RETRY_MS : cached.fullRetryAt,
+      })
+      return found
+    } finally {
+      // Invalidation may already have started another group for this key.
+      group.active--
+      if (group.active === 0 && pending.get(key) === group) {
+        pending.delete(key)
+      }
+    }
+  }
+}
+
 /**
  * Resolves candidate symbol names to definition locations across the active VS Code workspace.
  * @param candidateSymbolNames - Exact symbol names derived from a JSDoc link target.
  * @param cancellationToken - VS Code cancellation token for editor navigation requests.
+ * @param mode - Hover stops at the first match. Navigation collects all matching locations up to the result limit.
  * @returns Matching definition locations, ordered by VS Code workspace symbols first and AST fallback second.
  * @example
  * resolveDefinitionLocations(["useThing"], token) // => [Location(...)]
@@ -28,8 +128,9 @@ type ExtensionConfiguration = {
 export const resolveDefinitionLocations = async (
   candidateSymbolNames: readonly string[],
   cancellationToken: vscode.CancellationToken,
+  mode: LookupMode = 'all',
 ): Promise<vscode.Location[]> => {
-  const workspaceSymbolLocations = await resolveWorkspaceSymbolLocations(candidateSymbolNames, cancellationToken)
+  const workspaceSymbolLocations = await resolveWorkspaceSymbolLocations(candidateSymbolNames, cancellationToken, mode)
 
   if (workspaceSymbolLocations.length > 0 || cancellationToken.isCancellationRequested) {
     return workspaceSymbolLocations
@@ -41,7 +142,7 @@ export const resolveDefinitionLocations = async (
     return []
   }
 
-  return resolveSourceScanLocations(candidateSymbolNames, extensionConfiguration.maxSourceScanFiles, cancellationToken)
+  return resolveSourceScanLocations(candidateSymbolNames, extensionConfiguration.maxSourceScanFiles, cancellationToken, mode)
 }
 
 /**
@@ -55,6 +156,7 @@ export const resolveDefinitionLocations = async (
 const resolveWorkspaceSymbolLocations = async (
   candidateSymbolNames: readonly string[],
   cancellationToken: vscode.CancellationToken,
+  mode: LookupMode,
 ): Promise<vscode.Location[]> => {
   const candidateNameSet = new Set(candidateSymbolNames)
   const locations: vscode.Location[] = []
@@ -75,6 +177,8 @@ const resolveWorkspaceSymbolLocations = async (
         continue
       }
 
+      // A hover only needs evidence of one matching definition.
+      if (mode === 'first') return [workspaceSymbol.location]
       locations.push(workspaceSymbol.location)
     }
   }
@@ -95,60 +199,106 @@ const resolveSourceScanLocations = async (
   candidateSymbolNames: readonly string[],
   maxSourceScanFiles: number,
   cancellationToken: vscode.CancellationToken,
+  mode: LookupMode,
 ): Promise<vscode.Location[]> => {
-  const sourceFileUris = await vscode.workspace.findFiles(
+  const foundUris = await vscode.workspace.findFiles(
     SOURCE_FILE_GLOB,
     DEFAULT_IGNORED_WORKSPACE_GLOB,
     maxSourceScanFiles,
     cancellationToken,
   )
-  const locations: vscode.Location[] = []
+  const sourceFileUris = foundUris.filter(isSupportedSourceFileUri)
+  const diskLocations = new Map<vscode.Uri, vscode.Location[]>()
+  const deferred = new Set<vscode.Uri>()
+  const readErrors = new Map<vscode.Uri, unknown>()
+  const openDocument = (uri: vscode.Uri) => vscode.workspace.textDocuments.find(document =>
+    document.uri.toString() === uri.toString(),
+  )
+  const parseLocations = (uri: vscode.Uri, sourceText: string) => findSymbolDefinitionsInSourceText({
+    fileName: uri.fsPath,
+    sourceText,
+    candidateNames: candidateSymbolNames,
+  }).map(definition => new vscode.Location(uri, new vscode.Range(
+    definition.startLine, definition.startCharacter, definition.endLine, definition.endCharacter,
+  )))
 
-  for (const sourceFileUri of sourceFileUris) {
-    if (cancellationToken.isCancellationRequested) {
-      break
+  const watchedUris = mode === 'all' ? new Map(sourceFileUris.map(uri => [uri.toString(), uri])) : undefined
+  const readDisk = async (uri: vscode.Uri) => {
+    // Take one fresh disk snapshot after a save. Continuous edits cannot postpone F12 indefinitely.
+    if (diskLocations.has(uri)) watchedUris?.delete(uri.toString())
+    deferred.delete(uri)
+    readErrors.delete(uri)
+    let bytes: Uint8Array
+    try {
+      bytes = await vscode.workspace.fs.readFile(uri)
+    } catch (error) {
+      // Keep scanning other files, but surface the first failure if none can resolve the symbol.
+      if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) readErrors.set(uri, error)
+      return []
     }
-
-    if (!isSupportedSourceFileUri(sourceFileUri)) {
-      continue
-    }
-
-    const sourceText = await readWorkspaceFileAsUtf8(sourceFileUri)
-    const sourceDefinitions = findSymbolDefinitionsInSourceText({
-      fileName: sourceFileUri.fsPath,
-      sourceText,
-      candidateNames: candidateSymbolNames,
-    })
-
-    for (const sourceDefinition of sourceDefinitions) {
-      locations.push(
-        new vscode.Location(
-          sourceFileUri,
-          new vscode.Range(
-            sourceDefinition.startLine,
-            sourceDefinition.startCharacter,
-            sourceDefinition.endLine,
-            sourceDefinition.endCharacter,
-          ),
-        ),
-      )
-    }
+    return cancellationToken.isCancellationRequested ? [] : parseLocations(uri, Buffer.from(bytes).toString('utf8'))
   }
 
-  return takeFirstDefinitions(deduplicateLocations(locations))
-}
+  const saveListener = watchedUris && vscode.workspace.onDidSaveTextDocument(document => {
+    const uri = watchedUris.get(document.uri.toString())
+    // The event's live buffer can already include edits made after the save began.
+    if (uri) deferred.add(uri)
+  })
+  try {
+    for (const uri of sourceFileUris) {
+      if (cancellationToken.isCancellationRequested) return []
 
-/**
- * Reads a workspace file through VS Code's filesystem API so remote workspaces still work.
- * @param fileUri - The source file URI to read.
- * @returns UTF-8 source text.
- * @example
- * readWorkspaceFileAsUtf8(Uri.file("src/a.ts")) // => "export const a = 1"
- */
-const readWorkspaceFileAsUtf8 = async (fileUri: vscode.Uri): Promise<string> => {
-  const fileBytes = await vscode.workspace.fs.readFile(fileUri)
+      const document = openDocument(uri)
+      if (mode === 'first') {
+        // A pending read can finish after an editor has opened or changed the file.
+        const disk = document ? [] : await readDisk(uri)
+        if (cancellationToken.isCancellationRequested) return []
+        const current = document ?? openDocument(uri)
+        if (current) readErrors.delete(uri)
+        const [first] = current ? parseLocations(uri, current.getText()) : disk
+        if (first) return [first]
+      } else if (document) {
+        deferred.add(uri)
+      } else {
+        diskLocations.set(uri, await readDisk(uri))
+      }
+    }
 
-  return Buffer.from(fileBytes).toString('utf8')
+    if (cancellationToken.isCancellationRequested) return []
+    if (mode === 'first') {
+      if (readErrors.size) throw readErrors.values().next().value
+      return []
+    }
+    const snapshot = () => new Map(vscode.workspace.textDocuments.map(document => [document.uri.toString(), document]))
+    let open = snapshot()
+    // A buffer can close during recovery, so reconsider the remaining files after each read.
+    while (deferred.size) {
+      let closed: vscode.Uri | undefined
+      for (const uri of deferred) {
+        if (!open.has(uri.toString())) {
+          closed = uri
+          break
+        }
+      }
+      if (!closed) break
+      diskLocations.set(closed, await readDisk(closed))
+      if (cancellationToken.isCancellationRequested) return []
+      open = snapshot()
+    }
+    if (cancellationToken.isCancellationRequested) return []
+
+    // Read open buffers together after the last await to include their unsaved edits.
+    const locations: vscode.Location[] = []
+    for (const uri of sourceFileUris) {
+      const document = open.get(uri.toString())
+      if (document) readErrors.delete(uri)
+      locations.push(...(document ? parseLocations(uri, document.getText()) : diskLocations.get(uri) ?? []))
+    }
+    if (!locations.length && readErrors.size) throw readErrors.values().next().value
+    return takeFirstDefinitions(deduplicateLocations(locations))
+  } finally {
+    saveListener?.dispose()
+  }
 }
 
 /**

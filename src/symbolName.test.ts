@@ -27,4 +27,18 @@ describe('createCandidateSymbolQueries', () => {
     // Assert
     expect(candidateSymbolQueries).toEqual(['import("./types").ReadableDrawingItem', 'ReadableDrawingItem'])
   })
+
+  test.each([
+    "import(\"./it's\").Api.Widget",
+    "import('./say\"hello').Api.Widget",
+    'import("./escaped\\"quote").Api.Widget',
+    'import( "./types" ).Api.Widget',
+    'import ( "./types" ) . Api.Widget',
+  ])('keeps the import expression outside the qualified symbol name in %s', (linkTarget) => {
+    // Act
+    const queries = createCandidateSymbolQueries(linkTarget)
+
+    // Assert
+    expect(queries).toEqual([linkTarget, 'Api.Widget', 'Widget'])
+  })
 })
