@@ -222,8 +222,10 @@ const resolveSourceScanLocations = async (
     definition.startLine, definition.startCharacter, definition.endLine, definition.endCharacter,
   )))
 
+  const watchedUris = mode === 'all' ? new Map(sourceFileUris.map(uri => [uri.toString(), uri])) : undefined
   const readDisk = async (uri: vscode.Uri) => {
-    // A save during this read queues another read of the committed bytes.
+    // Take one fresh disk snapshot after a save. Continuous edits cannot postpone F12 indefinitely.
+    if (diskLocations.has(uri)) watchedUris?.delete(uri.toString())
     deferred.delete(uri)
     readErrors.delete(uri)
     let bytes: Uint8Array
@@ -237,9 +239,8 @@ const resolveSourceScanLocations = async (
     return cancellationToken.isCancellationRequested ? [] : parseLocations(uri, Buffer.from(bytes).toString('utf8'))
   }
 
-  const eligible = mode === 'all' ? new Map(sourceFileUris.map(uri => [uri.toString(), uri])) : undefined
-  const saveListener = eligible && vscode.workspace.onDidSaveTextDocument(document => {
-    const uri = eligible.get(document.uri.toString())
+  const saveListener = watchedUris && vscode.workspace.onDidSaveTextDocument(document => {
+    const uri = watchedUris.get(document.uri.toString())
     // The event's live buffer can already include edits made after the save began.
     if (uri) deferred.add(uri)
   })

@@ -433,3 +433,39 @@ test.each([
   ])
   expect(dispose).toHaveBeenCalledOnce()
 })
+
+test.each([false, true])('F12 rereads a closed file saved during its pending read, with another save during retry = %s', async saveDuringRetry => {
+  // Arrange
+  api.findFiles.mockResolvedValue([first])
+  const saveAndClose = (savedText: string) => {
+    const document = { uri: first, isDirty: false, getText: () => savedText }
+    api.textDocuments.push(document)
+    api.saveDocument.mock.calls[0][0](document)
+    api.textDocuments.pop()
+  }
+  let readStarted!: () => void
+  const reading = new Promise<void>(resolve => { readStarted = resolve })
+  let finishRead!: (bytes: Buffer) => void
+  const originalBytes = new Promise<Buffer>(resolve => { finishRead = resolve })
+  api.readFile.mockImplementationOnce(() => {
+    readStarted()
+    return originalBytes
+  }).mockImplementationOnce(() => {
+    // The retry has already captured the saved bytes when another save completes.
+    if (saveDuringRetry) saveAndClose('\n\n\nclass Widget {}')
+    return Buffer.from('\n\nclass Widget {}')
+  }).mockResolvedValue(Buffer.from('\n\n\nclass Widget {}'))
+
+  // Act
+  const navigation = resolveDefinitionLocations(['Widget'], token)
+  await reading
+  saveAndClose('\n\nclass Widget {}')
+  finishRead(Buffer.from('class Widget {}'))
+  const locations = await navigation
+
+  // Assert
+  expect(api.readFile).toHaveBeenCalledTimes(2)
+  expect(locations.map(({ uri, range }) => [uri.fsPath, range.start])).toEqual([
+    ['/src/first.ts', { line: 2, character: 6 }],
+  ])
+})
