@@ -201,12 +201,13 @@ const resolveSourceScanLocations = async (
   cancellationToken: vscode.CancellationToken,
   mode: LookupMode,
 ): Promise<vscode.Location[]> => {
-  const sourceFileUris = await vscode.workspace.findFiles(
+  const foundUris = await vscode.workspace.findFiles(
     SOURCE_FILE_GLOB,
     DEFAULT_IGNORED_WORKSPACE_GLOB,
     maxSourceScanFiles,
     cancellationToken,
   )
+  const sourceFileUris = foundUris.filter(isSupportedSourceFileUri)
   const diskLocations = new Map<vscode.Uri, vscode.Location[]>()
   const deferred = new Set<vscode.Uri>()
   const readErrors = new Map<vscode.Uri, unknown>()
@@ -221,37 +222,30 @@ const resolveSourceScanLocations = async (
     definition.startLine, definition.startCharacter, definition.endLine, definition.endCharacter,
   )))
 
-  const saved = new Map<string, { text: string }>()
   const readDisk = async (uri: vscode.Uri) => {
-    const key = uri.toString()
-    const beforeRead = saved.get(key)
+    // A save during this read queues another read of the committed bytes.
+    deferred.delete(uri)
+    readErrors.delete(uri)
     let bytes: Uint8Array
     try {
       bytes = await vscode.workspace.fs.readFile(uri)
     } catch (error) {
       // Keep scanning other files, but surface the first failure if none can resolve the symbol.
-      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
-        if (saved.get(key) === beforeRead) saved.delete(key)
-      } else {
-        readErrors.set(uri, error)
-      }
+      if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) readErrors.set(uri, error)
       return []
     }
-    // A successful read supersedes an earlier save unless another save raced the read.
-    if (saved.get(key) !== beforeRead) return []
-    saved.delete(key)
     return cancellationToken.isCancellationRequested ? [] : parseLocations(uri, Buffer.from(bytes).toString('utf8'))
   }
 
-  const eligible = mode === 'all' ? new Set(sourceFileUris.filter(isSupportedSourceFileUri).map(uri => uri.toString())) : undefined
+  const eligible = mode === 'all' ? new Map(sourceFileUris.map(uri => [uri.toString(), uri])) : undefined
   const saveListener = eligible && vscode.workspace.onDidSaveTextDocument(document => {
-    const key = document.uri.toString()
-    if (eligible.has(key)) saved.set(key, { text: document.getText() })
+    const uri = eligible.get(document.uri.toString())
+    // The event's live buffer can already include edits made after the save began.
+    if (uri) deferred.add(uri)
   })
   try {
     for (const uri of sourceFileUris) {
       if (cancellationToken.isCancellationRequested) return []
-      if (!isSupportedSourceFileUri(uri)) continue
 
       const document = openDocument(uri)
       if (mode === 'first') {
@@ -286,21 +280,18 @@ const resolveSourceScanLocations = async (
         }
       }
       if (!closed) break
-      deferred.delete(closed)
       diskLocations.set(closed, await readDisk(closed))
       if (cancellationToken.isCancellationRequested) return []
       open = snapshot()
     }
     if (cancellationToken.isCancellationRequested) return []
 
-    // Prefer the current buffer, then the latest editor save, then the completed disk read.
+    // Read open buffers together after the last await to include their unsaved edits.
     const locations: vscode.Location[] = []
     for (const uri of sourceFileUris) {
-      if (!isSupportedSourceFileUri(uri)) continue
       const document = open.get(uri.toString())
-      const sourceText = document?.getText() ?? saved.get(uri.toString())?.text
-      if (sourceText !== undefined) readErrors.delete(uri)
-      locations.push(...(sourceText !== undefined ? parseLocations(uri, sourceText) : diskLocations.get(uri) ?? []))
+      if (document) readErrors.delete(uri)
+      locations.push(...(document ? parseLocations(uri, document.getText()) : diskLocations.get(uri) ?? []))
     }
     if (!locations.length && readErrors.size) throw readErrors.values().next().value
     return takeFirstDefinitions(deduplicateLocations(locations))

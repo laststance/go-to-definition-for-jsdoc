@@ -397,9 +397,13 @@ test('F12 recovers successive closed buffers from disk and uses the latest open 
   ])
 })
 
-test('F12 navigates to the latest save when a recovered file reopens and closes during another read', async () => {
+test.each([
+  ['the saved buffer', '\n\nclass Widget {}'],
+  ['a later edit discarded on close', '\n\n\n\nclass Widget {}'],
+])('F12 uses the saved position after a reopened document closes with %s', async (_case, editorText) => {
   // Arrange
   const third = uri('/src/third.ts')
+  let firstOnDisk = 'class Widget {}'
   const dispose = vi.fn()
   api.saveDocument.mockReturnValue({ dispose })
   api.findFiles.mockResolvedValue([first, second, third])
@@ -409,9 +413,10 @@ test('F12 navigates to the latest save when a recovered file reopens and closes 
   )
   api.readFile.mockImplementation(async (file: vscode.Uri) => {
     if (file === third) api.textDocuments.length = 0
-    if (file === first) return Buffer.from('class Widget {}')
+    if (file === first) return Buffer.from(firstOnDisk)
     if (file === second) {
-      const reopened = { uri: first, isDirty: false, getText: () => '\n\nclass Widget {}' }
+      firstOnDisk = '\n\nclass Widget {}'
+      const reopened = { uri: first, isDirty: editorText !== firstOnDisk, getText: () => editorText }
       api.textDocuments.push(reopened)
       api.saveDocument.mock.calls[0][0](reopened)
       api.textDocuments.pop()
