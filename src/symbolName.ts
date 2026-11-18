@@ -1,10 +1,18 @@
+import * as ts from 'typescript'
+
 const HASH_PREFIX_PATTERN = /^#/u
 
 const TRAILING_CALL_PATTERN = /\([^)]*\)$/u
 
 const TYPE_PARAMETER_SUFFIX_PATTERN = /<[^<>]*>$/u
 
-const IMPORT_TYPE_PREFIX_PATTERN = /^import\((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\)\./u
+const IMPORT_TYPE_PREFIX_TOKENS = [
+  ts.SyntaxKind.ImportKeyword,
+  ts.SyntaxKind.OpenParenToken,
+  ts.SyntaxKind.StringLiteral,
+  ts.SyntaxKind.CloseParenToken,
+  ts.SyntaxKind.DotToken,
+] as const
 
 /**
  * Creates workspace symbol query candidates from a JSDoc link target.
@@ -28,7 +36,15 @@ export const createCandidateSymbolQueries = (linkTarget: string): string[] => {
  * stripImportTypePrefix('import("./types").Api.Widget') // => "Api.Widget"
  */
 export const stripImportTypePrefix = (normalizedLinkTarget: string): string => {
-  return normalizedLinkTarget.replace(IMPORT_TYPE_PREFIX_PATTERN, '')
+  if (!normalizedLinkTarget.startsWith('import')) return normalizedLinkTarget
+
+  // Let the TypeScript scanner handle quoted paths and trivia between tokens.
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.Standard, normalizedLinkTarget)
+  for (const token of IMPORT_TYPE_PREFIX_TOKENS) {
+    if (scanner.scan() !== token) return normalizedLinkTarget
+  }
+  scanner.scan()
+  return normalizedLinkTarget.slice(scanner.getTokenStart())
 }
 
 /**

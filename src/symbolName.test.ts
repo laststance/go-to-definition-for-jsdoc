@@ -32,7 +32,9 @@ describe('createCandidateSymbolQueries', () => {
     "import(\"./it's\").Api.Widget",
     "import('./say\"hello').Api.Widget",
     'import("./escaped\\"quote").Api.Widget',
-  ])('keeps quotes in the module path outside the symbol name in %s', (linkTarget) => {
+    'import( "./types" ).Api.Widget',
+    'import ( "./types" ) . Api.Widget',
+  ])('keeps the import expression outside the qualified symbol name in %s', (linkTarget) => {
     // Act
     const queries = createCandidateSymbolQueries(linkTarget)
 

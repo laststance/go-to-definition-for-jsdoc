@@ -35,11 +35,15 @@ type HoverCacheEntry = {
  * const hasDefinition = createHoverDefinitionLookup(context)
  */
 export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContext, 'subscriptions'>) => {
-  let cache = new Map<string, HoverCacheEntry>()
-  const latestPendingRequests = new Map<string, symbol>()
+  const cache = new Map<string, HoverCacheEntry>()
+  const pending = new Map<string, {
+    active: number
+    nextOrder: number
+    completed?: { order: number; found: boolean }
+  }>()
   const invalidate = () => {
-    cache = new Map()
-    latestPendingRequests.clear()
+    cache.clear()
+    pending.clear()
   }
   const invalidateSource = (uri: vscode.Uri) => {
     if (isSupportedSourceFileUri(uri)) {
@@ -63,31 +67,33 @@ export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContex
       return false
     }
     const key = JSON.stringify(candidateNames)
-    const snapshot = cache
-    const cached = snapshot.get(key)
+    const cached = cache.get(key)
     const now = Date.now()
     const needsFullLookup = !cached || now >= cached.fullRetryAt
     if (!needsFullLookup && (cached.found || now < cached.indexRetryAt)) {
       return cached.found
     }
 
-    // Track request order independently so evicting a cached result cannot revive a superseded lookup.
-    const request = Symbol()
-    latestPendingRequests.set(key, request)
+    // Retain the newest completed answer while overlapping requests can still publish.
+    const group = pending.get(key) ?? { active: 0, nextOrder: 0 }
+    pending.set(key, group)
+    group.active++
+    const order = group.nextOrder++
     try {
       // Retry misses against a warming index between full checks for unobserved filesystem changes.
       const locations = needsFullLookup
         ? await resolveDefinitionLocations(candidateNames, token, 'first')
         : await resolveWorkspaceSymbolLocations(candidateNames, token, 'first')
       // An edit or cancellation during the lookup makes its answer obsolete.
-      if (token.isCancellationRequested || snapshot !== cache) {
+      if (token.isCancellationRequested || pending.get(key) !== group) {
         return false
       }
-      if (latestPendingRequests.get(key) !== request) {
-        return cache.get(key)?.found ?? false
+      if (group.completed && group.completed.order > order) {
+        return group.completed.found
       }
 
       const found = locations.length > 0
+      group.completed = { order, found }
       if (!cache.has(key) && cache.size >= MAX_HOVER_CACHE_ENTRIES) {
         const oldest = cache.keys().next()
         if (!oldest.done) cache.delete(oldest.value)
@@ -100,9 +106,10 @@ export const createHoverDefinitionLookup = (context: Pick<vscode.ExtensionContex
       })
       return found
     } finally {
-      // A newer lookup may still own this key when an older one finishes.
-      if (latestPendingRequests.get(key) === request) {
-        latestPendingRequests.delete(key)
+      // Invalidation may already have started another group for this key.
+      group.active--
+      if (group.active === 0 && pending.get(key) === group) {
+        pending.delete(key)
       }
     }
   }
@@ -200,8 +207,10 @@ const resolveSourceScanLocations = async (
     cancellationToken,
   )
   const diskLocations = new Map<vscode.Uri, vscode.Location[]>()
-  const dirtyDocument = (uri: vscode.Uri) => vscode.workspace.textDocuments.find(document =>
-    document.isDirty && document.uri.toString() === uri.toString(),
+  const deferred: vscode.Uri[] = []
+  const readErrors = new Map<vscode.Uri, unknown>()
+  const openDocument = (uri: vscode.Uri) => vscode.workspace.textDocuments.find(document =>
+    document.uri.toString() === uri.toString(),
   )
   const parseLocations = (uri: vscode.Uri, sourceText: string) => findSymbolDefinitionsInSourceText({
     fileName: uri.fsPath,
@@ -211,41 +220,64 @@ const resolveSourceScanLocations = async (
     definition.startLine, definition.startCharacter, definition.endLine, definition.endCharacter,
   )))
 
+  const readDisk = async (uri: vscode.Uri) => {
+    let bytes: Uint8Array
+    try {
+      bytes = await vscode.workspace.fs.readFile(uri)
+    } catch (error) {
+      // Keep scanning other files, but surface the first failure if none can resolve the symbol.
+      if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) readErrors.set(uri, error)
+      return []
+    }
+    return cancellationToken.isCancellationRequested ? [] : parseLocations(uri, Buffer.from(bytes).toString('utf8'))
+  }
+
   for (const uri of sourceFileUris) {
-    if (cancellationToken.isCancellationRequested) break
+    if (cancellationToken.isCancellationRequested) return []
     if (!isSupportedSourceFileUri(uri)) continue
 
-    // Defer dirty buffers until navigation can read all open documents together.
-    let sourceText: string | undefined
-    if (!dirtyDocument(uri)) {
-      try {
-        sourceText = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8')
-      } catch (error) {
-        // A source may disappear or acquire an unsaved buffer while the read is pending.
-        if (!dirtyDocument(uri)) {
-          if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') continue
-          throw error
-        }
-      }
-    }
+    const document = openDocument(uri)
     if (mode === 'first') {
-      const currentText = dirtyDocument(uri)?.getText() ?? sourceText
-      if (currentText === undefined) continue
-      const [first] = parseLocations(uri, currentText)
+      // A pending read can finish after an editor has opened or changed the file.
+      const disk = document?.isDirty ? [] : await readDisk(uri)
+      if (cancellationToken.isCancellationRequested) return []
+      const current = openDocument(uri)
+      if (current) readErrors.delete(uri)
+      const [first] = current ? parseLocations(uri, current.getText()) : disk
       if (first) return [first]
+    } else if (document?.isDirty) {
+      deferred.push(uri)
     } else {
-      diskLocations.set(uri, sourceText === undefined ? [] : parseLocations(uri, sourceText))
+      diskLocations.set(uri, await readDisk(uri))
     }
   }
 
-  if (mode === 'first' || cancellationToken.isCancellationRequested) return []
+  if (cancellationToken.isCancellationRequested) return []
+  if (mode === 'first') {
+    if (readErrors.size) throw readErrors.values().next().value
+    return []
+  }
+  const snapshot = () => new Map(vscode.workspace.textDocuments.map(document => [document.uri.toString(), document]))
+  let open = snapshot()
+  if (deferred.some(uri => !open.has(uri.toString()))) {
+    // Cover every deferred file once: another buffer may close while recovering the first.
+    for (const uri of deferred) {
+      if (cancellationToken.isCancellationRequested) return []
+      diskLocations.set(uri, await readDisk(uri))
+    }
+    open = snapshot()
+  }
+  if (cancellationToken.isCancellationRequested) return []
 
-  // Open buffers reflect edits, saves and reverts that happened during later reads.
-  const openDocuments = new Map(vscode.workspace.textDocuments.map(document => [document.uri.toString(), document]))
-  const locations = Array.from(diskLocations).flatMap(([uri, matches]) => {
-    const document = openDocuments.get(uri.toString())
-    return document ? parseLocations(uri, document.getText()) : matches
-  })
+  // Read final buffers synchronously so later reads cannot invalidate earlier locations.
+  const locations: vscode.Location[] = []
+  for (const uri of sourceFileUris) {
+    if (!isSupportedSourceFileUri(uri)) continue
+    const document = open.get(uri.toString())
+    if (document) readErrors.delete(uri)
+    locations.push(...(document ? parseLocations(uri, document.getText()) : diskLocations.get(uri) ?? []))
+  }
+  if (!locations.length && readErrors.size) throw readErrors.values().next().value
   return takeFirstDefinitions(deduplicateLocations(locations))
 }
 

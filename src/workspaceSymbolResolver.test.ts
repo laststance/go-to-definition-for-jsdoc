@@ -218,6 +218,28 @@ test.each([true, false])('a delayed hover respects the newer result when the new
   expect(api.executeCommand).toHaveBeenCalledTimes(2)
 })
 
+test('a cancelled newer hover preserves the pending match and caches it for the next hover', async () => {
+  // Arrange
+  const lookup = createHoverDefinitionLookup({ subscriptions: [] })
+  const match = [{ name: 'Widget', location: { uri: first } }]
+  const newerToken = { ...token }
+  let finishOlder!: (symbols: typeof match) => void
+  api.executeCommand.mockReturnValueOnce(new Promise<typeof match>(resolve => { finishOlder = resolve }))
+
+  // Act
+  const older = lookup(['Widget'], token)
+  const newer = lookup(['Widget'], newerToken)
+  newerToken.isCancellationRequested = true
+  const cancelled = await newer
+  finishOlder(match)
+  const delayed = await older
+  const repeated = await lookup(['Widget'], token)
+
+  // Assert
+  expect([cancelled, delayed, repeated]).toEqual([false, true, true])
+  expect(api.executeCommand).toHaveBeenCalledTimes(2)
+})
+
 test('an evicted hover result cannot be replaced by an older pending match', async () => {
   // Arrange
   const lookup = createHoverDefinitionLookup({ subscriptions: [] })
@@ -280,4 +302,50 @@ test('F12 drops an unsaved declaration reverted while reading another file', asy
 
   // Assert
   expect(locations.map(location => location.uri.fsPath)).toEqual(['/src/second.ts'])
+})
+
+test.each(['before', 'after'])('hover and F12 find a target when an unreadable file occurs %s it', async order => {
+  // Arrange
+  const lookup = createHoverDefinitionLookup({ subscriptions: [] })
+  api.findFiles.mockResolvedValue(order === 'before' ? [second, first] : [first, second])
+  api.readFile.mockImplementation(async (file: vscode.Uri) => {
+    if (file === second) throw new api.FileSystemError('NoPermissions')
+    return Buffer.from('class Widget {}')
+  })
+
+  // Act
+  const hover = await lookup(['Widget'], token)
+  const navigation = await resolveDefinitionLocations(['Widget'], token)
+
+  // Assert
+  expect(hover).toBe(true)
+  expect(navigation.map(location => location.uri.fsPath)).toEqual(['/src/first.ts'])
+})
+
+test('F12 recovers successive closed buffers from disk and uses the latest open editor text', async () => {
+  // Arrange
+  const third = uri('/src/third.ts')
+  const fourth = uri('/src/fourth.ts')
+  const remaining = { uri: third, isDirty: true, getText: () => '' }
+  api.findFiles.mockResolvedValue([first, second, third, fourth])
+  api.textDocuments.push(
+    { uri: first, isDirty: true, getText: () => 'class Old {}' },
+    { uri: second, isDirty: true, getText: () => 'class Widget {}' },
+    remaining,
+  )
+  api.readFile.mockImplementation(async (file: vscode.Uri) => {
+    if (file === fourth) api.textDocuments.shift()
+    if (file === first) api.textDocuments.shift()
+    remaining.getText = () => 'class Widget {}'
+    return Buffer.from(file === first ? 'class Widget {}' : '')
+  })
+
+  // Act
+  const locations = await resolveDefinitionLocations(['Widget'], token)
+
+  // Assert
+  expect(locations.map(location => location.uri.fsPath)).toEqual(['/src/first.ts', '/src/third.ts'])
+  expect(api.readFile.mock.calls.map(([file]) => file.fsPath)).toEqual([
+    '/src/fourth.ts', '/src/first.ts', '/src/second.ts', '/src/third.ts',
+  ])
 })
